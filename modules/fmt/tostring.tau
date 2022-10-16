@@ -1,0 +1,35 @@
+module fmt
+
+maxStringSizeOf(size Value) -> size{
+    return 66
+}
+
+toString(size Value) -> str{
+    size bufferSize = Value.maxStringSizeOf()
+}
+
+maxStringSizeOf(u32 Value) -> size{
+    return 33
+}
+
+toString(size Value) -> str{
+    char[maxStringSizeOf(Value)] buffer
+    size offset = 0
+    if value < 0 {
+        buf[offset] = '-'
+        offset+=1
+    }
+    loop {
+        ++offset
+        auto remainder = Value % 10
+        Value = Value / 10
+        buf[offset] = '0' + remainder
+        if Value == 0 { break }
+    }
+    swizzle(buf)
+    //for auto i = 0; i <= offset; i+=1{
+    //    stackbuf[i] = buf[offset-i]
+    //}
+    stackbuf[offset+1] = 0
+    return strlit(stackbuf, offset)
+}

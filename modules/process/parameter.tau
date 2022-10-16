@@ -1,0 +1,8 @@
+module process
+
+use "kernel32"
+
+readParameters(ProcessModel Self) -> ProcessModel{
+    GetCommandLineA().split(" ",Self.parameters)
+    return Self
+}

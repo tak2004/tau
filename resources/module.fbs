@@ -1,0 +1,27 @@
+namespace tau.module;
+
+struct Version{
+    major:uint16;
+    minor:uint16;
+    build:uint32;
+}
+
+table Info{
+    version:Version;
+    name:string;
+}
+
+enum ASTFileFormat:byte { FlatBuffer = 0 }
+
+table ASTEntry{
+    format:ASTFileFormat = FlatBuffer;
+    bytes:uint64;
+    path:string;    
+}
+
+table Module{
+    info: Info;
+    asts:[ASTEntry];
+}
+
+root_type Module;

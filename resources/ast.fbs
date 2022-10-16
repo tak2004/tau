@@ -1,0 +1,60 @@
+namespace tau.ast;
+
+table TypeDeclaration{
+    isConstant: bool;
+    id: string;
+    templateTypes: [TypeOrID];
+    arraySize: uint64;
+}
+
+union TypeOrID{
+    string,
+    TypeDeclaration
+}
+
+struct Variable{
+    decorations:[Decoration];
+    type:TypeOrID;
+    id: string;
+}
+
+struct InterfaceFunction{
+    id: string;
+    parameters:[Variable];
+    returnType:TypeOrID;
+}
+
+struct Interface{
+    id: string;
+    functions: [InterfaceFunction];
+}
+
+struct Struct{
+    id: string;
+    members: [union{Variable, string}];
+}
+
+struct Section{
+    id:string;
+    payload:
+}
+
+struct Enum{
+    id:string;
+    ids:[string];
+}
+
+table Unit{
+    module: string;
+    uses: [string];
+    interfaces: [Interface];
+    structs: [Struct];
+    functions: [Function];
+    constants: [Constant];
+    aliases: [Alias];
+    decorators: [ASTDecorator];
+    sections: [Section];
+    enums: [Enum];
+}
+
+root_type Unit;

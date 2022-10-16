@@ -1,0 +1,15 @@
+use "tpm"
+
+run(){
+    auto pkg = tpm().package("cpual", "1.0.0")
+    .authors(["Thomas Kunze"])
+    .description("CPU abstraction layer for C++")
+    .dependencies([
+        {"test", "1.0.0"},
+        {"asmjit", "1.0.0"}
+    ])
+
+    pkg.build()
+
+    pkg.distribute()
+}

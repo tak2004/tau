@@ -1,0 +1,156 @@
+module arena
+
+use "kernel32"
+
+interface allocator{
+    reset()
+    allocate(size Bytes) -> ptr<void>
+    //resize(ptr<void> OldBlock, size OldBytes, size RequestBytes) -> ptr<void>
+    free(ptr<void> Allocation, size Bytes)
+    spaceUsed() -> size
+    spaceCapacity() -> size
+}
+
+// Linear heap allocator as top most allocator.
+struct heap{
+    ptr<void> virtualMemory
+//    size bytes
+    SYSTEM_INFO sysInfo
+    size bytes
+    size reserved
+}
+
+operator init(heap Self, size ReserveBytes){
+    GetSystemInfo(ptr(Self.sysInfo))
+    Self.bytes = 0
+    auto allocateBytes = (ReserveBytes + Self.sysInfo.AllocationGranularity - 1) & -Self.sysInfo.AllocationGranularity
+    Self.reserved = allocateBytes
+    Self.virtualMemory = VirtualAlloc(nullptr, allocateBytes, MEM_RESERVE|MEM_COMMIT, PAGE_NOACCESS)
+}
+
+allocate(heap Self, size Bytes) -> ptr<void> {
+    auto allocateBytes = (Bytes + Self.sysInfo.AllocationGranularity - 1) & -Self.sysInfo.AllocationGranularity
+    Self.bytes = Self.bytes + allocateBytes
+    return VirtualAlloc(Self.virtualMemory, allocateBytes, MEM_COMMIT, PAGE_NOACCESS)
+}
+
+reset(heap Self){
+}
+
+spaceUsed(heap Self) -> size{
+    return Self.bytes
+}
+
+spaceCapacity(heap Self) -> size{
+    return Self.bytes
+}
+
+free(heap Self, ptr<void> Allocation, size Bytes){
+    Self.bytes = Self.bytes - Bytes
+    VirtualFree(Allocation, Bytes, MEM_DECOMMIT)
+}
+
+// Type based allocator on top of the heap.
+struct pool{
+    //allocator allocator
+    ptr<void> pool
+    size bytes
+}
+
+operator init(pool Self, allocator ParentAllocator){
+    //Self.allocator = ParentAllocator
+    Self.pool = nullptr
+    Self.bytes = 0
+}
+
+reset(pool Self){
+}
+
+spaceUsed(pool Self) -> size{
+    return Self.bytes
+}
+
+spaceCapacity(pool Self) -> size{
+    return Self.bytes
+}
+
+allocate(pool Self, size Bytes) -> ptr<void>{
+    return nullptr
+}
+
+// The stack allocator is scope based.
+struct stack{
+    //allocator allocator
+    size top // first free slot
+    ptr<void> pool
+    size bytes
+}
+
+operator init(stack Self, allocator ParentAllocator){
+    //Self.allocator = ParentAllocator
+    Self.pool = nullptr
+    Self.bytes = 0
+    Self.top = 0
+}
+
+reset(stack Self){
+    Self.top = 0
+}
+
+allocate(stack Self, size Bytes) -> ptr<void>{
+    auto demand = Bytes + sizeof(size_t)
+    if Self.top + demand <= Self.bytes{
+        auto result = Self.pool.offset(Self.top)
+        writeSize(Self.pool, Self.bytes, Self.top+Bytes, Bytes)
+        Self.top = Self.top + demand
+        return result
+    } else {
+        return nullptr
+    }
+}
+
+free(stack Self, ptr<void> allocation, size Bytes){
+    if Self.top >= Bytes {
+        auto bytes = readSize(Self.pool, Self.bytes, Self.top - sizeof(size_t))
+        if bytes == Bytes{
+            Self.top = Self.top - Bytes - sizeof(size)
+        }
+    }
+}
+
+spaceUsed(stack Self) -> size{
+    return Self.bytes
+}
+
+spaceCapacity(stack Self) -> size{
+    return Self.top
+}
+
+// Frame allocator are defined by a start and endpoint. 
+struct frame{
+    pool local
+    ptr<void> pool
+    size bytes
+}
+
+operator init(frame Self, allocator ParentAllocator){
+    //Self.local = ParentAllocator
+    Self.pool = nullptr
+    Self.bytes = 0
+}
+
+allocate(frame Arena, size Bytes)->ptr<void>{
+    return Arena.local.allocate(Bytes)
+}
+
+reset(frame Arena){
+    Arena.local.reset()
+}
+
+spaceUsed(frame Arena) -> size{
+    return Arena.local.spaceUsed()
+}
+
+swap(frame ArenaA, frame ArenaB){
+    //ArenaA.local
+}

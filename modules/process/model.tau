@@ -1,0 +1,31 @@
+module process
+
+aliases{
+    ProcessID = u64
+}
+
+struct ProcessModel{
+    ProcessID id
+    vec<strview> parameters
+    vec<pair<strview>> environmentVariables
+}
+
+operator init(ProcessModel Self, ProcessID PID){
+    Self.id = PID
+    Self.readParameters().readEnvironmentVariables()
+}
+
+operator init(ProcessModel Self) {
+    Self.id = GetCurrentProcessId()
+    Self.readParameters().readEnvironmentVariables()
+}
+
+process()->ProcessModel{
+    [[thread]]ProcessModel result
+    return result
+}
+
+process(ProcessID PID)->ProcessModel{
+    ProcessModel result(PID)
+    return result
+}

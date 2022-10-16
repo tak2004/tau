@@ -1,0 +1,57 @@
+module kernel32
+
+struct OSVERSIONINFOA {
+  DWORD     OSVersionInfoSize
+  DWORD     MajorVersion
+  DWORD     MinorVersion
+  DWORD     BuildNumber
+  DWORD     PlatformId
+  CHAR[128] CSDVersion
+}
+
+struct OSVERSIONINFOEXA {
+  embed OSVERSIONINFOA
+  WORD  ServicePackMajor
+  WORD  ServicePackMinor
+  WORD  SuiteMask
+  BYTE  ProductType
+  BYTE  Reserved
+}
+
+struct SYSTEM_INFO {
+  DWORD OemId
+  DWORD PageSize
+  ptr<void> MinimumApplicationAddress
+  ptr<void> MaximumApplicationAddress
+  ptr<i32> ActiveProcessorMask
+  DWORD NumberOfProcessors
+  DWORD ProcessorType
+  DWORD AllocationGranularity
+  WORD ProcessorLevel
+  WORD ProcessorRevision
+}
+
+struct MEMORYSTATUSEX {
+  DWORD Length
+  DWORD MemoryLoad
+  u64 TotalPhys
+  u64 AvailPhys
+  u64 TotalPageFile
+  u64 AvailPageFile
+  u64 TotalVirtual
+  u64 AvailVirtual
+  u64 AvailExtendedVirtual
+}
+
+[[lib:"Kernel32.dll"]]
+aliases {
+    ExitProcess = (u32 ExitCode) 
+    GetStdHandle = (i32 StdHandle) -> HANDLE
+    GetVersionExA = (ptr<OSVERSIONINFOEXA> VersionInformation) -> bool
+    GetSystemInfo = (ptr<SYSTEM_INFO> SystemInfo)
+    GlobalMemoryStatusEx = (ptr<MEMORYSTATUSEX> MemoryInfo) -> bool
+}
+
+constants {
+    STD_OUTPUT_HANDLE = -11
+}

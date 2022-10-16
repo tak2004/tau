@@ -1,0 +1,157 @@
+module tau
+
+interface memory{
+    ptr()->ptr<u8>
+    bytes()->size
+}
+
+interface str{
+    ptr()->ptr<void>
+    length()->size
+    bytes()->size
+    capacity()->size
+    //operator [](size Byte)->u8
+}
+
+[[lib:"Kernel32.dll"]]
+aliases {
+    GetProcessHeap = () -> ptr<void>
+    HeapAlloc = (ptr<void> Heap, i32 Flags, size Bytes) -> ptr<u8>
+    HeapFree = (ptr<void> Heap, i32 Flags, ptr<void> Mem) -> bool
+}
+
+struct mem{
+    ptr<u8> data
+    size bytes
+    size references
+}
+
+// constructor
+operator init(mem Self, size Bytes){
+    auto heap = GetProcessHeap()
+    auto memory = HeapAlloc(heap, 0, Bytes)
+    Self.data = memory
+    Self.bytes = Bytes
+    Self.references = 1
+}
+
+// destructor
+operator free(mem Self){
+    if Self.references == 1 {
+        auto heap = GetProcessHeap()
+        HeapFree(heap, 0, Self.data)
+        Self.data = nullptr
+        Self.bytes = 0
+        Self.references = 0
+    } else {
+        Self.references = Self.references - 1
+    }
+}
+
+use "process"
+use "console"
+use "arena"
+/*
+lexer(mem Buffer){
+    u8[] terminals = {':', '?', '*', '|', '(', ')', '{, '}', ',', '+','[',']'}
+    strlit[] keywords = {"%ignore", "%import"}
+    auto bytes = Buffer.bytes
+    for c in [0:bytes]{
+        console().log(Buffer.data[c])
+    }
+}*/
+
+load_grammar(mem Buffer, strlit Root, bool MaybePlaceholder)->bool{
+    return true
+}
+
+struct TokenLocationInfo{
+    u64 Offset
+    u64 Bytes
+    u64 Line
+    u64 Column
+}
+
+struct Node{
+    ptr<Node> FirstChild
+    ptr<Node> Next
+    size TokenIndex
+    u8 Kind
+}
+/*
+aliases{
+    TokenList = pair<vec<u8>, vec<TokenLocationInfo>>
+}
+
+printNode(Node Node, TokenList Tokens, ptr<u8> Buffer, size Bytes, size Depth){
+    for i in [0:Depth]{
+        console().log("\t")
+    }
+    console().log("Node: ")
+    console().log(Node.TokenIndex.toString())
+    if Node.TokenIndex != 0 {
+        strview text
+        text.str = Buffer
+        text.start = Tokens.right.at(Node.TokenIndex).Offset
+        text.bytes = Tokens.right.at(Node.TokenIndex).Bytes
+        console().log(text)
+    }
+    console().log("\n")
+}*/
+
+run(){
+    // Define the memory management.
+    MEMORYSTATUSEX systemMemoryInfo
+    systemMemoryInfo.Length = sizeof(MEMORYSTATUSEX)
+    GlobalMemoryStatusEx(ptr(systemMemoryInfo))
+    heap systemAllocator(systemMemoryInfo.TotalPhys/10*9)
+    pool pool(systemAllocator)
+    stack stack(systemAllocator)
+    frame lastFrame(systemAllocator)
+    frame currentFrame(systemAllocator)
+
+    auto lalr = "./resources/tau.lalr"    
+    auto file = CreateFileA(lalr.ptr.toConstU8(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY|FILE_FLAG_SEQUENTIAL_SCAN, nullptr)
+    auto readBytes = GetFileSize(file, nullptr)
+    mem buf(readBytes+1)// terminate the data with 0 as End Of File
+    ReadFile(file, buf.data, readBytes, ptr(readBytes), nullptr)
+    CloseHandle(file)
+
+    //auto parser = load_grammar(buf, "unit_", true)
+    auto tokens = lexer(buf.data, buf.bytes, true, true)
+    size i = tokens.left.elements
+    for t in [0:i]{
+        console().log(tokens.left[t].toString())
+        console().log(": start=")
+        console().log(tokens.right[t].Offset.toString())
+        console().log(" bytes=")
+        console().log(tokens.right[t].Bytes.toString())
+        console().log(" column=")
+        console().log(tokens.right[t].Column.toString())
+        console().log(" line=")
+        console().log(tokens.right[t].Line.toString())
+        console().log("\n")
+    }
+    vec<Node> nodePool
+    ptr<Node> parseTree = parser(tokens, nodePool, buf.data, buf.bytes)
+    parseTree.topDown(printNode, tokens, buf.data, buf.bytes)
+
+    vec<strview> argv
+    i = GetCommandLineA().split(" ", argv)
+    //console().log(argv.capacity.toString())
+    //console().log("\x1b[38;2;0;200;0m")
+    for j in [1:i] {
+        //console().log("Input "+j+" is: "+argv[j]+"\n")
+        console().log(argv[j])
+    }
+//    console().log("\x1b[39m")
+//    console().log(process().parameters.elements.toString())
+//    for p in process().parameters {
+//        console().log(p)
+//    }
+
+    //u64 frame = 0
+    //loop{
+    //    frame = frame + 1
+    //}
+}

@@ -1,0 +1,13 @@
+module fmt
+
+template<... Types>
+fmt(str FormatString, ... Values) -> str {
+    size maxBuffer = FormatString.bytes()
+    for arg in Types{
+        maxBuffer += maxStringSize(arg)
+    }
+    memory scratchPad = mem(maxBuffer)
+    for v in Values{
+        v.toString()
+    }
+}

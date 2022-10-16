@@ -1,0 +1,18 @@
+module kernel32
+
+constants {
+    MEM_COMMIT   = 0x00001000
+    MEM_RESERVE  = 0x00002000
+    MEM_DECOMMIT = 0x00004000
+    MEM_RELEASE  = 0x00008000        
+    MEM_COALESCE_PLACEHOLDERS = 0x00000001
+    MEM_PRESERVE_PLACEHOLDER  = 0x00000002
+
+    PAGE_NOACCESS = 0x01
+}
+
+[[lib:"Kernel32.dll"]]
+aliases {
+    VirtualAlloc = (ptr<void> BaseAddress,size Size, u32 AllocationType, u32 PageProtection) -> ptr<void>
+    VirtualFree = (ptr<void> Address, size Size, i32 FreeType) -> bool
+}

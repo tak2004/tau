@@ -1,0 +1,146 @@
+_separated{e, sep}: e (sep e)*
+
+unit_: module block*
+module: "module" NAME
+?block: struct
+        | function_definition
+        | constants_
+        | aliases_
+        | ast_decorator
+        | use
+        | operator
+        | interfaces_
+        | enum_
+
+use: "use" (ESCAPED_STRING | match) ("," (ESCAPED_STRING | match))*
+match: "match"
+
+enum_: "enum" NAME "{" NAME+ "}"
+
+interfaces_: "interface" NAME "{" interface_function+ "}"
+interface_function: NAME function_declaration
+
+operator: "operator" operator_type function_declaration "{" statement* "}"
+operator_type: "free" -> operator_free
+                | "init" -> operator_init
+
+struct: "struct" NAME "{" struct_body "}"
+struct_body:(variable_declaration|embed)*
+
+constants_: "constants" "{" constant_declaration+ "}"
+constant_declaration: NAME "=" test_expr
+
+aliases_: [decorations] "aliases" "{" alias_declaration+ "}"
+alias_declaration: [decorations] NAME "=" (type_declaration_ | function_declaration)
+
+// Post processor
+ast_decorator: "decorator" NAME "(" "__AST__" NAME "," "__AST__" NAME "," "__AST__" NAME ")" "{" (assign|function_call|method_call)* "}"
+
+type_declaration_: [IS_CONST] NAME ["<" typelist ">"] [type_static_array]
+typelist: type_declaration_ ("," type_declaration_)*
+IS_CONST: "const"
+type_static_array: "[" DEC_NUMBER "]"
+
+assign: (variable_declaration|molecule) "=" (test_expr|init_list)
+variable_init: [decorations] type_declaration_ NAME ["(" arglist ")"]
+init_list: "{}" -> init_default
+            | "{" arglist "}"
+    
+variable_declaration: type_declaration_ NAME
+embed: "embed" NAME
+function_declaration: paramlist ["->" type_declaration_]
+function_definition: NAME function_declaration "{" statement* "}"
+?statement: assign
+            | variable_init
+            | return
+            | function_call
+            | method_call
+            | for_declaration
+            | while
+            | if_declaration
+            | loop
+paramlist : ("(" variable_declaration ("," variable_declaration)* ")" | "()")
+
+decorations : "[[" _separated{decoration, ","} "]]"
+?decoration: NAME [":" (DEC_NUMBER | ESCAPED_STRING)]
+
+function_call: NAME "(" [arglist] ")"
+method_call: molecule "." NAME "(" [arglist] ")"
+
+for_declaration: "for" (for_range|for_loop) "{" statement* "}"
+for_range: NAME "in" (molecule | subscript_slice)
+for_loop: for_init? ";" test_expr
+for_init: assign ("," assign)*
+
+loop: "loop" "{" statement+ "}"
+
+while: "while" test_expr "{" statement* "}"
+
+if_declaration: "if" test_expr then_block [else_block]
+then_block: "{" statement+ "}" 
+else_block: "else" "{" statement+ "}"
+
+return: "return" test_expr
+?test_expr: bit_equality_expr test_expr_right?    
+test_expr_right: "&&" bit_equality_expr test_expr_right? -> logic_and
+                | "||" bit_equality_expr test_expr_right? -> logic_or
+?bit_equality_expr: equality_expr bit_equality_expr_right?
+bit_equality_expr_right: "&" equality_expr bit_equality_expr_right? -> bit_and
+                        | "^" equality_expr bit_equality_expr_right? -> bit_xor
+                        | "|" equality_expr bit_equality_expr_right? -> bit_or
+?equality_expr: relational_expr equality_expr_right?
+equality_expr_right: "!=" relational_expr equality_expr_right? -> unequal
+                    | "==" relational_expr equality_expr_right? -> equal
+?relational_expr: arith_expr relational_expr_right?
+relational_expr_right: "<"  arith_expr relational_expr_right? -> smaller
+                        | ">"  arith_expr relational_expr_right? -> larger
+                        | "<=" arith_expr relational_expr_right? -> smaller_equal
+                        | ">=" arith_expr relational_expr_right? -> larger_equal
+//-> bitshift
+?arith_expr: term arith_expr_right?
+arith_expr_right: "+" term arith_expr_right? -> add
+                | "-" term arith_expr_right? -> sub
+?term: factor term_right?
+term_right: "*" factor term_right? -> mul
+            | "/" factor term_right? -> div
+            | "%" factor term_right? -> mod
+?factor: "++" factor -> prefix_inc
+        | "--" factor -> prefix_dec
+        | "-" factor -> sign_neg
+        | "+" factor -> sign_pos
+        | "!" factor -> logical_not
+        | "~" factor -> bitwise_not
+        | molecule
+?molecule: atom
+            | molecule "++" -> postfix_inc
+            | molecule "--" -> postfix_dec
+            | molecule subscript_list -> get_item
+            | molecule "." NAME -> get_attr
+            | molecule "::" NAME -> get_enum_value
+            | method_call
+
+?atom: "(" test_expr ")" -> compound
+        | function_call
+        | NAME         
+        | HEX_NUMBER -> number
+        | DEC_NUMBER -> number
+        | ESCAPED_STRING -> string         
+
+subscript_list: "[" SIGNED_DEC_NUMBER "]" -> subscript_offset
+                | subscript_slice
+                | "[" NAME "]" -> subscript_variable
+subscript_slice: "[" molecule ":" molecule "]"
+SIGNED_DEC_NUMBER: ["-"] DEC_NUMBER
+DEC_NUMBER: /[1-9]\d*/
+            | "0"
+HEX_NUMBER.1: /0x[\da-f]+/i
+arglist: test_expr ("," test_expr)*
+
+%import common.ESCAPED_STRING
+%import common.CNAME -> NAME
+%import common.WS
+%ignore WS
+%import common.CPP_COMMENT
+%import common.C_COMMENT
+%ignore CPP_COMMENT
+%ignore C_COMMENT

@@ -1,0 +1,53 @@
+module console
+
+use "kernel32"
+
+struct ConsoleModel{
+    HANDLE handle
+}
+
+enum ColorLevel { 
+    NoColorSupport
+    HasBasic
+    Has256
+    Has16m 
+}
+
+getColorLevelSupport() -> ColorLevel{
+    OSVERSIONINFOEXA osvi
+    osvi.OSVersionInfoSize = sizeof(OSVERSIONINFOEXA)
+    if GetVersionExA(ptr(osvi)) && osvi.MajorVersion >= 10 && osvi.BuildNumber >= 10586 {
+        if osvi.BuildNumber != 14931 {
+            return ColorLevel::Has16m
+        } else {
+            return ColorLevel::Has256
+        }
+    }
+    return ColorLevel::HasBasic
+}
+
+setEscapeSequenceProcessing(ConsoleModel Self, bool Enable){
+    bitmask<u32> mode
+    GetConsoleMode(Self.handle, ptr(mode.data))
+    if Enable != mode.isSet(ENABLE_VIRTUAL_TERMINAL_PROCESSING) {
+        mode.set(ENABLE_VIRTUAL_TERMINAL_PROCESSING, Enable)
+        SetConsoleMode(Self.handle, mode.data)
+        //SetConsoleOutputCP(CP_UTF8)
+    }    
+}
+
+operator init(ConsoleModel Self){
+    Self.handle = GetStdHandle(STD_OUTPUT_HANDLE)
+    if getColorLevelSupport() == ColorLevel::Has16m{
+        Self.setEscapeSequenceProcessing(true)
+    }
+}
+
+console()->ConsoleModel{
+    [[thread]]ConsoleModel result
+    return result
+}
+
+log(ConsoleModel Self, str Text){
+    WriteConsoleA(Self.handle, Text.ptr(), Text.bytes(), nullptr, nullptr)
+}

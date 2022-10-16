@@ -1,0 +1,42 @@
+module kernel32
+
+constants {
+  ENABLE_VIRTUAL_TERMINAL_PROCESSING = 4
+}
+
+struct CONSOLE_CURSOR_INFO {
+    DWORD Size
+    bool Visible
+}
+
+struct COORD {
+  SHORT X
+  SHORT Y
+}
+
+struct SMALL_RECT {
+  SHORT Left
+  SHORT Top
+  SHORT Right
+  SHORT Bottom
+}
+
+struct CONSOLE_SCREEN_BUFFER_INFO {
+  COORD      Size
+  COORD      CursorPosition
+  WORD       Attributes
+  SMALL_RECT Window
+  COORD      MaximumWindowSize
+}
+
+[[lib:"Kernel32.dll"]]
+aliases {
+    WriteConsoleA = (HANDLE ConsoleOutput, ptr<const void> Buffer, u32 NumberOfCharsToWrite, 
+                     ptr<u32> NumberOfCharsWritten, ptr<void> Reserved) -> i32
+    GetConsoleMode = (HANDLE ConsoleOutput, ptr<u32> Mode)
+    SetConsoleMode = (HANDLE ConsoleOutput, DWORD Mode)
+    SetConsoleOutputCP = (u32 CodePageID)
+    GetConsoleScreenBufferInfo = (HANDLE ConsoleOutput, ptr<CONSOLE_SCREEN_BUFFER_INFO> Info)
+    GetConsoleCursorInfo = (HANDLE ConsoleOutput, ptr<CONSOLE_CURSOR_INFO> Info)
+    SetConsoleCursorInfo = (HANDLE ConsoleOutput, ptr<const CONSOLE_CURSOR_INFO> Info)
+}

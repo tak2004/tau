@@ -1,0 +1,9 @@
+module kernel32
+
+[[lib:"Kernel32.dll"]]
+aliases {
+    GetEnvironmentStringsA = () -> LPCH
+    FreeEnvironmentStringA = (LPCH Env) -> bool
+    GetCommandLineA = () -> cstr
+    GetCurrentProcessId = () -> DWORD
+}

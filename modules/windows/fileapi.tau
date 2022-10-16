@@ -1,0 +1,42 @@
+module kernel32
+
+constants {
+    GENERIC_READ = 0x80000000
+
+    OPEN_EXISTING = 0x03
+
+    FILE_ATTRIBUTE_READONLY = 0x01
+    FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
+    FILE_SHARE_READ = 0x00000001
+}
+
+struct SECURITY_ATTRIBUTES {
+    DWORD length
+    LPVOID securityDescriptor
+    bool inheritHandle
+}
+
+struct OVERLAPPED {
+    ULONG_PTR Internal
+    ULONG_PTR InternalHigh
+    LPVOID    Pointer
+    HANDLE    hEvent
+}
+
+aliases {
+    LPSECURITY_ATTRIBUTES = ptr<SECURITY_ATTRIBUTES>
+    LPOVERLAPPED = ptr<OVERLAPPED>
+}
+
+[[lib:"Kernel32.dll"]]
+aliases {
+    CreateFileA = (LPCSTR Filename, u32 DesiredAccess, u32 SharedMode, 
+                   LPSECURITY_ATTRIBUTES SecurityAttributes, u32 CreationDisposition,
+                   u32 FlagsAndAttributes, HANDLE TemplateFile) -> HANDLE 
+    CloseHandle = (HANDLE Handle) -> bool
+    ReadFile = (HANDLE File, LPVOID Buffer, DWORD NumberOfBytesToRead, 
+                LPDWORD NumberOfBytesRead, LPOVERLAPPED Overlapped) -> bool
+    WriteFile = (HANDLE File, LPVOID Buffer, DWORD NumberOfBytesToWrite, 
+                 LPDWORD NumberOfBytesWritten, LPOVERLAPPED Overlapped) -> bool
+    GetFileSize = (HANDLE File, LPDWORD FileSizeHigh) -> DWORD
+}

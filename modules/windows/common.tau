@@ -1,0 +1,17 @@
+module kernel32
+
+aliases {
+    LPCSTR = ptr<const u8> 
+    HANDLE = ptr<void>
+    HWND = HANDLE
+    LPVOID = ptr<void>
+    DWORD = i32
+    LPDWORD = ptr<i32>
+    ULONG_PTR = u64
+    LPSTR = ptr<u8>
+    LPCH = ptr<u8>
+    SHORT = u16
+    WORD = i16
+    CHAR = u8
+    BYTE = u8
+}
