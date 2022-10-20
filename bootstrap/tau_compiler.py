@@ -131,9 +131,9 @@ class ASTToCpp(Visitor):
 
     def renderFunctionDeclaration(self, node:Function) -> str:
         result = ''
-        returnType = "void" if node.returnTypeID == None else self.solveTypeID(node.returnTypeID) if isinstance(node.returnTypeID, ID) else self.solveTypeDeclaration(node.returnTypeID)
-        params = self.renderFunctionParameter(node.parameters)
-        result += '%s%s %s(%s)' % (self.renderTemplateList(node.parameters),returnType, node.id.name, params)
+        returnType = "void" if node.declaration.returnTypeID == None else self.solveTypeID(node.declaration.returnTypeID) if isinstance(node.declaration.returnTypeID, ID) else self.solveTypeDeclaration(node.declaration.returnTypeID)
+        params = self.renderFunctionParameter(node.declaration.parameters)
+        result += '%s%s %s(%s)' % (self.renderTemplateList(node.declaration.parameters),returnType, node.id.name, params)
         return result
 
     def renderFunctionImport(self, name: str, decl:FunctionDeclaration):
@@ -196,7 +196,7 @@ class ASTToCpp(Visitor):
         return False
 
     def BinaryOperation(self, node:BinaryOperation) -> bool:
-        print(node)
+        #print(node)
         self.top_down(node.left)
         self.code += node.operation
         self.top_down(node.right)
@@ -237,6 +237,7 @@ class ASTToCpp(Visitor):
     def Function(self, node:Function)->bool:
         self.code += self.renderFunctionDeclaration(node) + ' {\n'
         self.indent += 1
+        #print(node.body)
         for e in node.body:
             self.code += "\t" * self.indent
             self.top_down(e)
@@ -411,7 +412,7 @@ class ASTToCpp(Visitor):
                         Variable(None, struct.id, ID('result')), 
                         Return(ID('result'))
                     ]
-                    unit.functions.append(Function(ID(initFunction), [], struct.id, code))
+                    unit.functions.append(Function(ID(initFunction), FunctionDeclaration([], struct.id), code))
 
 def compile(unit: Unit, f, tau_directory:str) -> bool:
     envScript = r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
@@ -426,7 +427,7 @@ def compile(unit: Unit, f, tau_directory:str) -> bool:
 
 def build(input, module_directory:str = 'tau/', cache_directory:str = 'tau/', tau_directory:str = './',  linkModule:str = None):
     module = None
-    print(input)
+    #print(input)
     with open(module_directory+input, 'rb') as f:
         module = pickle.loads(f.read())
     # Generate the C++ code.

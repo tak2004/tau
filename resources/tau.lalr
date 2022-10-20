@@ -1,9 +1,7 @@
-_separated{e, sep}: e (sep e)*
-
 unit_: module block*
 module: "module" NAME
 ?block: struct
-        | function_definition
+        | function
         | constants_
         | aliases_
         | ast_decorator
@@ -49,7 +47,8 @@ init_list: "{}" -> init_default
 variable_declaration: type_declaration_ NAME
 embed: "embed" NAME
 function_declaration: paramlist ["->" type_declaration_]
-function_definition: NAME function_declaration "{" statement* "}"
+function: NAME function_declaration "{" statements "}"
+statements: statement*
 ?statement: assign
             | variable_init
             | return
@@ -61,7 +60,7 @@ function_definition: NAME function_declaration "{" statement* "}"
             | loop
 paramlist : ("(" variable_declaration ("," variable_declaration)* ")" | "()")
 
-decorations : "[[" _separated{decoration, ","} "]]"
+decorations : "[[" decoration ("," decoration)* "]]"
 ?decoration: NAME [":" (DEC_NUMBER | ESCAPED_STRING)]
 
 function_call: NAME "(" [arglist] ")"
@@ -69,8 +68,8 @@ method_call: molecule "." NAME "(" [arglist] ")"
 
 for_declaration: "for" (for_range|for_loop) "{" statement* "}"
 for_range: NAME "in" (molecule | subscript_slice)
-for_loop: for_init? ";" test_expr
-for_init: assign ("," assign)*
+for_loop: for_init ";" test_expr
+?for_init: assign ("," assign)*
 
 loop: "loop" "{" statement+ "}"
 
@@ -131,15 +130,18 @@ subscript_list: "[" SIGNED_DEC_NUMBER "]" -> subscript_offset
                 | "[" NAME "]" -> subscript_variable
 subscript_slice: "[" molecule ":" molecule "]"
 SIGNED_DEC_NUMBER: ["-"] DEC_NUMBER
-DEC_NUMBER: /[1-9]\d*/
-            | "0"
-HEX_NUMBER.1: /0x[\da-f]+/i
+DEC_NUMBER: "1".."9" ("0".."9")*
+          | "0"
+HEX_NUMBER.1: "0x" ("0".."9"|"a".."f"|"A".."F")+
 arglist: test_expr ("," test_expr)*
+// The NEW_LINE tokenizer rule is associated to a new line action.
+NEW_LINE: "\n" | "\r" | "\n\r"
+WS: " " | "\t"
 
 %import common.ESCAPED_STRING
 %import common.CNAME -> NAME
-%import common.WS
 %ignore WS
+%ignore NEW_LINE
 %import common.CPP_COMMENT
 %import common.C_COMMENT
 %ignore CPP_COMMENT

@@ -65,8 +65,7 @@ class Interface(ASTNode):
 @dataclass
 class Function(ASTNode):
     id: ID
-    parameters: List[Variable] # List(variable)
-    returnTypeID: ID
+    declaration: FunctionDeclaration
     body: List[ASTNode]
 
 @dataclass

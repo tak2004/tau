@@ -78,6 +78,12 @@ struct Node{
     size TokenIndex
     u8 Kind
 }
+
+struct Lexer{
+    vec<size> Terminals
+    vec<size> Ignore
+}
+
 /*
 aliases{
     TokenList = pair<vec<u8>, vec<TokenLocationInfo>>
@@ -99,6 +105,22 @@ printNode(Node Node, TokenList Tokens, ptr<u8> Buffer, size Bytes, size Depth){
     console().log("\n")
 }*/
 
+printTokenList(TokenList Tokens){
+    size i = Tokens.left.elements
+    for t in [0:i]{
+        console().log(Tokens.left[t].toString())
+        console().log(": start=")
+        console().log(Tokens.right[t].Offset.toString())
+        console().log(" bytes=")
+        console().log(Tokens.right[t].Bytes.toString())
+        console().log(" column=")
+        console().log(Tokens.right[t].Column.toString())
+        console().log(" line=")
+        console().log(Tokens.right[t].Line.toString())
+        console().log("\n")
+    }
+}
+
 run(){
     // Define the memory management.
     MEMORYSTATUSEX systemMemoryInfo
@@ -113,28 +135,36 @@ run(){
     auto lalr = "./resources/tau.lalr"    
     auto file = CreateFileA(lalr.ptr.toConstU8(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY|FILE_FLAG_SEQUENTIAL_SCAN, nullptr)
     auto readBytes = GetFileSize(file, nullptr)
-    mem buf(readBytes+1)// terminate the data with 0 as End Of File
+    mem buf(readBytes)
     ReadFile(file, buf.data, readBytes, ptr(readBytes), nullptr)
     CloseHandle(file)
 
     //auto parser = load_grammar(buf, "unit_", true)
     auto tokens = lexer(buf.data, buf.bytes, true, true)
-    size i = tokens.left.elements
-    for t in [0:i]{
-        console().log(tokens.left[t].toString())
-        console().log(": start=")
-        console().log(tokens.right[t].Offset.toString())
-        console().log(" bytes=")
-        console().log(tokens.right[t].Bytes.toString())
-        console().log(" column=")
-        console().log(tokens.right[t].Column.toString())
-        console().log(" line=")
-        console().log(tokens.right[t].Line.toString())
-        console().log("\n")
-    }
+    //printTokenList(tokens)
     vec<Node> nodePool
     ptr<Node> parseTree = parser(tokens, nodePool, buf.data, buf.bytes)
-    parseTree.topDown(printNode, tokens, buf.data, buf.bytes)
+    //parseTree.topDown(printNode, tokens, buf.data, buf.bytes)
+    auto tauLexer = parseTree.compile(nodePool, tokens, buf.data, buf.bytes)
+    auto i = tauLexer.Ignore.elements
+    for t in [0:i]{
+        console().log(tauLexer.Ignore[t].toString())
+        console().log("\n")
+    }
+    i = tauLexer.Terminals.elements
+    for p in [0:i]{
+        console().log(tauLexer.Terminals[p].toString())
+        console().log("\n")
+    }
+
+    auto codeFilename = "./frontend/main.tau"    
+    auto codefile = CreateFileA(codeFilename.ptr.toConstU8(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY|FILE_FLAG_SEQUENTIAL_SCAN, nullptr)
+    readBytes = GetFileSize(codefile, nullptr)
+    mem code(readBytes)
+    ReadFile(codefile, code.data, readBytes, ptr(readBytes), nullptr)
+    CloseHandle(codefile)
+    auto codeTokens = tauLexer.tokenize(code.data,readBytes,true)
+    printTokenList(codeTokens)
 
     vec<strview> argv
     i = GetCommandLineA().split(" ", argv)

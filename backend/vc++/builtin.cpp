@@ -1,6 +1,7 @@
 #ifdef __PRE
 #include <cstdint>
 #include <cmath>
+#include <intrin.h>
 extern "C"
 {
     uint32_t _tls_index{};
@@ -93,7 +94,8 @@ strlit toString(size_t value){
     for (auto i = 0; i <= offset;++i){
         stackbuf[i] = buf[offset-i];
     }
-    stackbuf[offset+1] = 0;
+    offset++;
+    stackbuf[offset] = 0;
     strlit result = {stackbuf, offset};
     return result;
 }
@@ -182,6 +184,17 @@ size_t bytes(strview string){
     return string.bytes;
 }
 
+bool isUpperCase(strview string){
+    bool result = true;
+    for(auto i = string.start; i < string.start+string.bytes; ++i){
+        if (string.str[i] < 'A' || string.str[i] > 'Z'){
+            result = false;
+            break;
+        }
+    }
+    return result;
+}
+
 struct cstr{
     const uint8_t* data;
 };
@@ -250,6 +263,7 @@ struct mem;
 struct shortstring;
 struct TokenLocationInfo;
 struct Node;
+struct Lexer;
 
 using TokenList = pair<vec<uint8_t>,vec<TokenLocationInfo>>;
 
@@ -267,6 +281,11 @@ void bottomUp(Node* Node, TreeFunction Function, TokenList& Tokens,
               uint8_t* Buffer, size_t Bytes, size_t Depth = 0);
 
 void printNode(Node* Node, TokenList& Tokens, uint8_t* Buffer, size_t Bytes, size_t Depth);
+Lexer compile(Node* Root, vec<Node>& Pool, TokenList& Tokens, uint8_t* Buffer, size_t Bytes);
+TokenList tokenize(Lexer& LexerModel,uint8_t* Buffer, size_t Bytes, bool GenerateTokenInfos);
+
+typedef struct regex_t* re_t;
+int re_matchp(re_t pattern, const char* text, int* matchlength);
 #endif
 #ifdef __POST
 enum SingleCharacterTerminals:uint8_t{
@@ -276,9 +295,6 @@ enum SingleCharacterTerminals:uint8_t{
     Pipe,
     LeftParenthesis,
     RightParenthesis,
-    LeftBracket,
-    RightBracket,
-    Comma,
     Plus,
     LeftSquareBracket,
     RightSquareBracket,
@@ -302,24 +318,23 @@ enum RangeTerminals : uint8_t{
     Digit
 };
 enum MultipleCharacterTerminals: uint8_t{
-    Ignore=RangeTerminals::Digit,
+    Ignore=RangeTerminals::Digit+1,
     Import,
     Alias,
     Name,
     Comment,
-    String
+    String,
+    RangeOperator
 };
 
 TokenList lexer(uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool GenerateTokenInfos){
     TokenList result;
     result.left = initvec<uint8_t>();
     result.right = initvec<TokenLocationInfo>();
-    Buffer[Bytes] = 0;    
-    uint8_t terminals[SingleCharacterTerminals::EndOfStream+1] = {':', '?', '*', '|', '(', ')', '{', '}', ',', '+','[',']','\"', '%', '-', '>', '_', ' ', '\t', '\n', '/', '\r','.', '\\', 0};
+    uint8_t terminals[SingleCharacterTerminals::EndOfStream+1] = {':', '?', '*', '|', '(', ')',  '+','[',']','\"', '%', '-', '>', '_', ' ', '\t', '\n', '/', '\r','.', '\\', 0};
     uint8_t skipables[] = {SingleCharacterTerminals::Space,
         SingleCharacterTerminals::Tab,SingleCharacterTerminals::CarriageReturn};
 
-    //const char* TNames[] = {"COLON", "QUESTIONMARK", "START", "PIPE", "LPARA", "RPARA", "LBRACE", "RBRACE", "COMMA", "PLUS", "LBRACKET", "RBRACKET"};
     const char* keywords[3] = {"%ignore", "%import", "->"};
     // token infos
     uint64_t col = 1;
@@ -416,7 +431,7 @@ TokenList lexer(uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool Genera
         // Multi byte terminals.
 
         // Rule: comment
-        if (terminal == 20){// "//" !("\n"|"\r")*
+        if (terminal == SingleCharacterTerminals::Slash){// "//" !("\n"|"\r")*
             if (Buffer[c] == '/'){
                 auto lookAhead = 0;
                 for(;;){
@@ -431,14 +446,21 @@ TokenList lexer(uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool Genera
         }
 
         // Rule: alias
-        if (terminal == 14){// "->"
+        if (terminal == SingleCharacterTerminals::Minus){// "->"
             if (Buffer[c] == '>'){
                 terminal = MultipleCharacterTerminals::Alias;
                 c+=1;
             }
         }
+        // Rule: range operator
+        if (terminal == SingleCharacterTerminals::Colon){// ".."
+            if (Buffer[c] == '.'){
+                terminal = MultipleCharacterTerminals::RangeOperator;
+                c+=1;
+            }
+        }
         // Rule: command
-        if (terminal == 13){// "%" ("ignore"|"import")
+        if (terminal == SingleCharacterTerminals::Percent){// "%" ("ignore"|"import")
             for (auto i = 0; i< 2; ++i){
                 bool isSame = true;
                 for (auto j = 0; j < 6; ++j){
@@ -463,7 +485,7 @@ TokenList lexer(uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool Genera
             }
         }
         // Rule: string
-        if (terminal==12){// "\"" !("\n"|"\r"|"\"")* "\""
+        if (terminal==SingleCharacterTerminals::DoubleQuotation){// "\"" !("\n"|"\r"|"\"")* "\""
             auto lookAhead = 0;
             for(;;){
                 ++lookAhead;
@@ -478,7 +500,7 @@ TokenList lexer(uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool Genera
             }
         }
         // Rule: name
-        if (terminal==RangeTerminals::Letter || terminal==16){ // ("_" | LETTER) ("_" | LETTER | DIGIT)*
+        if (terminal==RangeTerminals::Letter || terminal==SingleCharacterTerminals::Underscore){ // ("_" | LETTER) ("_" | LETTER | DIGIT)*
             auto lookAhead = 0;
             for(;;lookAhead++){
                 switch(Buffer[c+lookAhead]){
@@ -577,7 +599,7 @@ TokenList lexer(uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool Genera
         }
 
         if (GenerateTokenInfos){
-            if (terminal == 19){
+            if (terminal == SingleCharacterTerminals::NewLine){
                 col = 1;
                 line++;
             } else {
@@ -590,8 +612,6 @@ TokenList lexer(uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool Genera
 
 enum class NodeKind:uint8_t{
     Program=0,
-    Template,
-    TemplateParameters,
     Rule,
     RuleEmbedded,
     ExpressionList,
@@ -603,14 +623,14 @@ enum class NodeKind:uint8_t{
     Name,
     String,
     Alias,
-    OptionalExpression,
-    TemplateCall
+    Range,
+    OptionalExpression
 };
 
-const char* NodeKindString[]={"Program","Template","TemplateParameters","Rule", "RuleEmbedded",
+const char* NodeKindString[]={"Program","Rule", "RuleEmbedded",
                               "ExpressionList","Expression","ParentheseExpression", "OccuranceModifier",
-                              "Import","Ignore","Name","String", "Alias", "OptionalExpression", "TemplateCall"};
-const size_t NodeKindStringSize[]={7,8,18,4,12,14,10,20,17,6,6,4,6,5,18,12};
+                              "Import","Ignore","Name","String", "Alias", "Range", "OptionalExpression"};
+const size_t NodeKindStringSize[]={7,4,12,14,10,20,17,6,6,4,6,5,5,18};
 
 Node& createNode(vec<Node>& Pool, NodeKind Kind){
     Node& result = add(Pool);
@@ -642,7 +662,7 @@ size_t expressionList(TokenList& Tokens, size_t Offset, Node& ParentNode, vec<No
     for(;;){
         auto& expr = createNode(Pool, NodeKind::Expression);
         attachChild(ParentNode, expr);
-        // expr: (paren_expr | Name | String | occ_mod | template_call)* ["->" Name]
+        // expr: (paren_expr | Name | String | occ_mod | range)* ["->" Name]
         for(;;){
             // paren_expr: "(" exrplist ")"
             if (Tokens.left[Offset+offset] == SingleCharacterTerminals::LeftParenthesis){
@@ -655,7 +675,8 @@ size_t expressionList(TokenList& Tokens, size_t Offset, Node& ParentNode, vec<No
                 // occ_mod: (Name | paren_expr) "*"
                 //        | (Name | paren_expr) "+"
                 if (Tokens.left[Offset+offset] == SingleCharacterTerminals::Star ||
-                    Tokens.left[Offset+offset] == SingleCharacterTerminals::Plus) {
+                    Tokens.left[Offset+offset] == SingleCharacterTerminals::Plus ||
+                    Tokens.left[Offset+offset] == SingleCharacterTerminals::Questionmark) {
                     auto& modifier = createNode(Pool, NodeKind::OccuranceModifier);
                     modifier.TokenIndex = Offset+offset;
                     attachChild(modifier, expressions);
@@ -677,37 +698,6 @@ size_t expressionList(TokenList& Tokens, size_t Offset, Node& ParentNode, vec<No
                 attachChild(expr, expressions);
                 continue;
             }
-            // template_call: Name "{" template_parameter "}"
-            if (Tokens.left[Offset+offset] == MultipleCharacterTerminals::Name &&
-                Tokens.left[Offset+offset+1] == SingleCharacterTerminals::LeftBracket){
-                auto& templateCall = createNode(Pool, NodeKind::TemplateCall);    
-                attachChild(expr, templateCall);
-                auto& name = createNode(Pool, NodeKind::Name);
-                name.TokenIndex = Offset+offset;
-                attachChild(templateCall, name);
-                offset++;       
-                auto& parameters = createNode(Pool, NodeKind::TemplateParameters);
-                attachChild(templateCall, parameters);     
-                // template_parameters: Name ("," Name)*
-                do{
-                    offset++;
-                    if (Tokens.left[Offset+offset] == MultipleCharacterTerminals::Name){
-                        auto& name = createNode(Pool, NodeKind::Name);
-                        name.TokenIndex = Offset+offset;
-                        attachChild(parameters, name);
-                        offset++;
-                    }
-                    if (Tokens.left[Offset+offset] == MultipleCharacterTerminals::String){
-                        auto& str = createNode(Pool, NodeKind::String);
-                        str.TokenIndex = Offset+offset;
-                        attachChild(parameters, str);
-                        offset++;
-                    }
-                } while(Tokens.left[Offset+offset] == SingleCharacterTerminals::Comma);
-                if (Tokens.left[Offset+offset] == SingleCharacterTerminals::RightBracket){
-                    offset++;
-                }
-            }
             // Name
             if (Tokens.left[Offset+offset] == MultipleCharacterTerminals::Name){
                 auto& name = createNode(Pool, NodeKind::Name);
@@ -716,7 +706,8 @@ size_t expressionList(TokenList& Tokens, size_t Offset, Node& ParentNode, vec<No
                 // occ_mod: (Name | paren_expr) "*"
                 //        | (Name | paren_expr) "+"
                 if (Tokens.left[Offset+offset] == SingleCharacterTerminals::Star ||
-                    Tokens.left[Offset+offset] == SingleCharacterTerminals::Plus) {
+                    Tokens.left[Offset+offset] == SingleCharacterTerminals::Plus ||
+                    Tokens.left[Offset+offset] == SingleCharacterTerminals::Questionmark) {
                     auto& modifier = createNode(Pool, NodeKind::OccuranceModifier);
                     modifier.TokenIndex = Offset+offset;
                     attachChild(modifier, name);
@@ -727,12 +718,32 @@ size_t expressionList(TokenList& Tokens, size_t Offset, Node& ParentNode, vec<No
                 }
                 continue;
             }
+            // String | Range
             if (Tokens.left[Offset+offset] == MultipleCharacterTerminals::String){
-                auto& str = createNode(Pool, NodeKind::String);
-                str.TokenIndex = Offset+offset;
-                attachChild(expr, str);
                 offset++;
-                continue;
+                // Range: String RangeOperator String
+                if (Tokens.left[Offset+offset] == SingleCharacterTerminals::RangeOperator){
+                    offset++;
+                    if (Tokens.left[Offset+offset] == MultipleCharacterTerminals::String){
+                        auto& range = createNode(Pool, NodeKind::Range);
+                        auto& start = createNode(Pool, NodeKind::String);
+                        auto& end = createNode(Pool, NodeKind::String);
+                        start.TokenIndex = Offset+offset-2;
+                        end.TokenIndex = Offset+offset;
+                        attachChild(expr, range);
+                        attachChild(range, start);
+                        attachChild(range, end);
+                        offset++;
+                        continue;
+                    }
+                } else{
+                    // String
+                    auto& str = createNode(Pool, NodeKind::String);
+                    str.TokenIndex = Offset+offset;
+                    attachChild(expr, str);
+                    offset++;
+                    continue;
+                }
             }
             break;
         }
@@ -760,7 +771,7 @@ size_t expressionList(TokenList& Tokens, size_t Offset, Node& ParentNode, vec<No
 template<class T>
 T* parser(TokenList& Tokens, vec<T>& pool,uint8_t* Buffer, size_t Bytes){
     auto& root = createNode(pool, NodeKind::Program);
-    // program: (rule | import | ignore | template)*
+    // program: (rule | import | ignore)*
     for (auto t = 0; t < Tokens.left.elements;){
         // ignore: Ignore Name
         if (Tokens.left[t] == MultipleCharacterTerminals::Ignore){
@@ -785,43 +796,9 @@ T* parser(TokenList& Tokens, vec<T>& pool,uint8_t* Buffer, size_t Bytes){
                 t+=2;
                 continue;
             }
-        }        
-        if (Tokens.left[t] == MultipleCharacterTerminals::Name){
-            // template: Name "{" template_parameters "}" ":" exprlist
-            if (Tokens.left[t+1] == SingleCharacterTerminals::LeftBracket){
-                auto& node = createNode(pool, NodeKind::Template);
-                auto& name = createNode(pool, NodeKind::Name);
-                name.TokenIndex = t;
-                attachChild(node, name);
-                auto& parameters = createNode(pool, NodeKind::TemplateParameters);
-                attachChild(node, parameters);
-                auto& expressions = createNode(pool, NodeKind::ExpressionList);
-                attachChild(node, expressions);
-                attachChild(root, node);
-                auto offset = 1;
-                // template_parameters: Name ("," Name)*
-                do{
-                    offset++;
-                    if (Tokens.left[t+offset] == MultipleCharacterTerminals::Name){
-                        auto& name = createNode(pool, NodeKind::Name);
-                        name.TokenIndex = t+offset;
-                        attachChild(parameters, name);
-                        offset++;
-                    }
-                } while(Tokens.left[t+offset] == SingleCharacterTerminals::Comma);
-
-                if(Tokens.left[t+offset] == SingleCharacterTerminals::RightBracket){
-                    offset++;
-                }
-
-                if (Tokens.left[t+offset] == SingleCharacterTerminals::Colon){
-                    offset++;
-                    offset+=expressionList(Tokens, t+offset, expressions, pool, Buffer, Bytes);
-                }
-                t+=offset;
-                continue;
-            }
-            // rule: Name ":" exprlist
+        }   
+        // rule: Name ":" exprlist     
+        if (Tokens.left[t] == MultipleCharacterTerminals::Name){            
             if (Tokens.left[t+1] == SingleCharacterTerminals::Colon){
                 auto& node = createNode(pool, NodeKind::Rule);
                 auto& name = createNode(pool, NodeKind::Name);
@@ -922,4 +899,383 @@ void printNode(Node* Node, TokenList& Tokens, uint8_t* Buffer, size_t Bytes, siz
     }
     print({"\n",1});
 }
+
+template<class T>
+bool isAligned(const void* Pointer){
+    return (reinterpret_cast<uintptr_t>(Pointer) % sizeof(T)) == 0;
+}
+
+void CRC32(const uint8_t *Source, size_t Bytes, uint32_t& CRC32Hash)
+{
+    // Process each byte until a 4 byte alignment is reached.
+    for(; !isAligned<uint32_t>(Source) && Bytes > 0; Source++, Bytes--)
+        CRC32Hash = _mm_crc32_u8(CRC32Hash, *Source);
+    // Process 4 bytes at the time.
+    for(; Bytes > 4; Source+=4, Bytes-=4)
+        CRC32Hash = _mm_crc32_u32(CRC32Hash, *(const uint32_t *)Source);
+    // Process trailing 3 bytes.
+    for(; Bytes > 0; Source++, Bytes--)
+        CRC32Hash = _mm_crc32_u8(CRC32Hash, *Source);
+}
+
+Lexer compile(Node* Root, vec<Node>& Pool, TokenList& Tokens, uint8_t* Buffer, size_t Bytes){
+    Lexer lexer;
+    lexer.Ignore=initvec<size_t>();
+    lexer.Terminals=initvec<size_t>();
+    vec<uint32_t> hasharray = initvec<uint32_t>();
+    resize(hasharray,Pool.elements*16);
+
+    vec<size_t> rules = initvec<size_t>();
+    for (size_t i = 0; i < Pool.elements; ++i){        
+        switch(static_cast<NodeKind>(Pool[i].Kind)){
+            case NodeKind::Ignore:                
+                add(lexer.Ignore) = Pool[i].FirstChild->TokenIndex;
+                break;
+            case NodeKind::String:
+            {
+                // Register the String token as a terminal.
+                // Generate hash key.
+                uint32_t hash=0xffffffff;
+                CRC32(Buffer+Tokens.right[Pool[i].TokenIndex].Offset,
+                      Tokens.right[Pool[i].TokenIndex].Bytes-1, hash);
+                // Find the bucket of the key.
+                size_t bucketIndex = (hash &(Pool.elements-1))*16;
+                // Look for the key in the bucket.
+                bool isKeyExists = false;
+                for (auto j = 0; j < 16; ++j){
+                    if (hasharray[j+bucketIndex]==hash){
+                        isKeyExists = true;
+                        break;// The key already exists the current Terminal is already known.
+                    }
+                }
+                if (isKeyExists == false){
+                    // Insert the key in the bucket.
+                    for (auto j = 0; j < 16; ++j){
+                        if (hasharray[j+bucketIndex]==0){
+                            hasharray[j+bucketIndex]=hash;
+                            break;
+                        }
+                    }
+                    append(lexer.Terminals,Pool[i].TokenIndex);
+                }
+                break;
+            }
+            case NodeKind::Range:
+                
+                break;
+            case NodeKind::Rule:
+            case NodeKind::RuleEmbedded:
+            {
+                // Process the rule if the Name token is upper case.
+                // The Name node is a first level child of the rule.
+                Node* childNode=Pool[i].FirstChild;
+                while((childNode != nullptr) && (childNode->Kind != static_cast<uint8_t>(NodeKind::Name))){
+                    childNode = childNode->Next;
+                }                
+                if (childNode){// Found the Name node.
+                    strview text = {Buffer,Tokens.right[childNode->TokenIndex].Offset,Tokens.right[childNode->TokenIndex].Bytes-1};
+                    if (isUpperCase(text)){
+                        append(rules,i);// Remember the rule for further processing.
+                    }
+                }
+                break;
+            }
+        }
+    }
+    // Process the rules into a compact form.
+    // EndOfStream = 0
+    // Unknown = 1
+    // NEW_LINE = 2
+    // Terminals ...
+    // RuleSymbols ...
+
+    return lexer;
+}
+
+TokenList tokenize(Lexer& LexerModel,uint8_t* Buffer, size_t Bytes, bool GenerateTokenInfos){
+    TokenList result;
+    result.left = initvec<uint8_t>();
+    result.right = initvec<TokenLocationInfo>();
+    // token infos
+    uint64_t col = 1;
+    uint64_t line = 1;
+    for (auto c = 0; c < Bytes;){
+        uint8_t terminal = 1;
+        auto start = c;
+
+        for (auto i = 0; i < LexerModel.Terminals.elements; ++i){
+            if ()
+        }
+        c++;
+        
+        bool skip = false;
+        for (auto i = 0; i < LexerModel.Ignore.elements; ++i){
+            if (LexerModel.Ignore[i] == terminal){
+                skip = true;
+                break;
+            }
+        }
+
+        if (skip == false){
+            append(result.left, terminal);
+            if (GenerateTokenInfos){
+                TokenLocationInfo v = {start, c-start, line, col};
+                append(result.right, v);
+            }
+        }
+
+        if (GenerateTokenInfos){
+            if (terminal == SingleCharacterTerminals::NewLine){
+                col = 1;
+                line++;
+            } else {
+                col+=c-start;
+            }
+        }
+    }
+    return result;
+}
+
+#define MAX_REGEXP_OBJECTS      30    /* Max number of regex symbols in expression. */
+#define MAX_CHAR_CLASS_LEN      40    /* Max length of character-class buffer in.   */
+
+enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, /* BRANCH */ };
+
+typedef struct regex_t
+{
+  unsigned char  type;   /* CHAR, STAR, etc.                      */
+  union
+  {
+    unsigned char  ch;   /*      the character itself             */
+    unsigned char* ccl;  /*  OR  a pointer to characters in class */
+  } u;
+} regex_t;
+
+static int matchpattern(regex_t* pattern, const char* text, int* matchlength);
+static int matchcharclass(char c, const char* str);
+static int matchstar(regex_t p, regex_t* pattern, const char* text, int* matchlength);
+static int matchplus(regex_t p, regex_t* pattern, const char* text, int* matchlength);
+static int matchone(regex_t p, char c);
+static int matchdigit(char c);
+static int matchalpha(char c);
+static int matchwhitespace(char c);
+static int matchmetachar(char c, const char* str);
+static int matchrange(char c, const char* str);
+static int matchdot(char c);
+static int ismetachar(char c);
+
+int re_matchp(re_t pattern, const char* text, int* matchlength)
+{
+  *matchlength = 0;
+  if (pattern != 0)
+  {
+    if (pattern[0].type == BEGIN)
+    {
+      return ((matchpattern(&pattern[1], text, matchlength)) ? 0 : -1);
+    }
+    else
+    {
+      int idx = -1;
+      do
+      {
+        idx += 1;
+        if (matchpattern(pattern, text, matchlength))
+        {
+          if (text[0] == '\0')
+            return -1;
+          return idx;
+        }
+      }
+      while (*text++ != '\0');
+    }
+  }
+  return -1;
+}
+
+static int matchdigit(char c)
+{
+  return isdigit(c);
+}
+static int matchalpha(char c)
+{
+  return isalpha(c);
+}
+static int matchwhitespace(char c)
+{
+  return isspace(c);
+}
+static int matchalphanum(char c)
+{
+  return ((c == '_') || matchalpha(c) || matchdigit(c));
+}
+static int matchrange(char c, const char* str)
+{
+  return (    (c != '-')
+           && (str[0] != '\0')
+           && (str[0] != '-')
+           && (str[1] == '-')
+           && (str[2] != '\0')
+           && (    (c >= str[0])
+                && (c <= str[2])));
+}
+static int matchdot(char c)
+{
+  (void)c;
+  return 1;
+}
+static int ismetachar(char c)
+{
+  return ((c == 's') || (c == 'S') || (c == 'w') || (c == 'W') || (c == 'd') || (c == 'D'));
+}
+
+static int matchmetachar(char c, const char* str)
+{
+  switch (str[0])
+  {
+    case 'd': return  matchdigit(c);
+    case 'D': return !matchdigit(c);
+    case 'w': return  matchalphanum(c);
+    case 'W': return !matchalphanum(c);
+    case 's': return  matchwhitespace(c);
+    case 'S': return !matchwhitespace(c);
+    default:  return (c == str[0]);
+  }
+}
+
+static int matchcharclass(char c, const char* str)
+{
+  do
+  {
+    if (matchrange(c, str))
+    {
+      return 1;
+    }
+    else if (str[0] == '\\')
+    {
+      /* Escape-char: increment str-ptr and match on next char */
+      str += 1;
+      if (matchmetachar(c, str))
+      {
+        return 1;
+      }
+      else if ((c == str[0]) && !ismetachar(c))
+      {
+        return 1;
+      }
+    }
+    else if (c == str[0])
+    {
+      if (c == '-')
+      {
+        return ((str[-1] == '\0') || (str[1] == '\0'));
+      }
+      else
+      {
+        return 1;
+      }
+    }
+  }
+  while (*str++ != '\0');
+  return 0;
+}
+
+static int matchone(regex_t p, char c)
+{
+  switch (p.type)
+  {
+    case DOT:            return matchdot(c);
+    case CHAR_CLASS:     return  matchcharclass(c, (const char*)p.u.ccl);
+    case INV_CHAR_CLASS: return !matchcharclass(c, (const char*)p.u.ccl);
+    case DIGIT:          return  matchdigit(c);
+    case NOT_DIGIT:      return !matchdigit(c);
+    case ALPHA:          return  matchalphanum(c);
+    case NOT_ALPHA:      return !matchalphanum(c);
+    case WHITESPACE:     return  matchwhitespace(c);
+    case NOT_WHITESPACE: return !matchwhitespace(c);
+    default:             return  (p.u.ch == c);
+  }
+}
+
+static int matchstar(regex_t p, regex_t* pattern, const char* text, int* matchlength)
+{
+  int prelen = *matchlength;
+  const char* prepoint = text;
+  while ((text[0] != '\0') && matchone(p, *text))
+  {
+    text++;
+    (*matchlength)++;
+  }
+  while (text >= prepoint)
+  {
+    if (matchpattern(pattern, text--, matchlength))
+      return 1;
+    (*matchlength)--;
+  }
+  *matchlength = prelen;
+  return 0;
+}
+
+static int matchplus(regex_t p, regex_t* pattern, const char* text, int* matchlength)
+{
+  const char* prepoint = text;
+  while ((text[0] != '\0') && matchone(p, *text))
+  {
+    text++;
+    (*matchlength)++;
+  }
+  while (text > prepoint)
+  {
+    if (matchpattern(pattern, text--, matchlength))
+      return 1;
+    (*matchlength)--;
+  }
+
+  return 0;
+}
+
+static int matchquestion(regex_t p, regex_t* pattern, const char* text, int* matchlength)
+{
+  if (p.type == UNUSED)
+    return 1;
+  if (matchpattern(pattern, text, matchlength))
+      return 1;
+  if (*text && matchone(p, *text++))
+  {
+    if (matchpattern(pattern, text, matchlength))
+    {
+      (*matchlength)++;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
+{
+  int pre = *matchlength;
+  do
+  {
+    if ((pattern[0].type == UNUSED) || (pattern[1].type == QUESTIONMARK))
+    {
+      return matchquestion(pattern[0], &pattern[2], text, matchlength);
+    }
+    else if (pattern[1].type == STAR)
+    {
+      return matchstar(pattern[0], &pattern[2], text, matchlength);
+    }
+    else if (pattern[1].type == PLUS)
+    {
+      return matchplus(pattern[0], &pattern[2], text, matchlength);
+    }
+    else if ((pattern[0].type == END) && pattern[1].type == UNUSED)
+    {
+      return (text[0] == '\0');
+    }
+  (*matchlength)++;
+  }
+  while ((text[0] != '\0') && matchone(*pattern++, *text++));
+  *matchlength = pre;
+  return 0;
+}
+
 #endif

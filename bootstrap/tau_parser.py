@@ -48,15 +48,15 @@ class TranformToNodes(Transformer):
             code = [s[1].parameters[0]]
             code.extend(s[2:])
             code.append(Return(s[1].parameters[0].id))
-            return Function(ID(functionName+s[1].parameters[0].typeID.id.name),parameters,s[1].parameters[0].typeID,code)
+            return Function(ID(functionName+s[1].parameters[0].typeID.id.name),FunctionDeclaration(parameters,s[1].parameters[0].typeID),code)
         if s[0].data == "operator_free":
             functionName:str = s[0].data.split('_')[1]
-            return Function(ID(functionName+s[1].parameters[0].typeID.id.name),s[1].parameters,None,s[2:])
+            return Function(ID(functionName+s[1].parameters[0].typeID.id.name),FunctionDeclaration(s[1].parameters,None),s[2:])
         return None
-    def function_definition(self, s):
-        return Function(s[0],s[1].parameters, s[1].returnTypeID, s[2:])
     def for_declaration(self, s):
         return For(s[0],s[1:])
+    def statements(self, s):
+        return s
     def loop(self, s):
         return For(None, s)
     def if_declaration(self, s):
@@ -146,8 +146,7 @@ class TranformToNodes(Transformer):
         return ["%",s[0]]
     def compound(self, s):
         return Compound(s)
-    def term(self, s):        
-        print(s)
+    def term(self, s):
         return BinaryOperation(s[0], s[1][1], s[1][0])
     def decorations(self, s):
         return s
@@ -499,7 +498,7 @@ def build(input, module_directory:str = 'tau/', cache_directory:str = 'tau/', ta
     for filename in inputFiles:
         print("Parse "+filename)
         parser = Lark(grammar, start='unit_', parser="lalr", maybe_placeholders=True)
-        print(parser.terminals)
+        #print(parser.terminals)
         try:
             with open(filename) as f:
                 parseTree = parser.parse(f.read())
