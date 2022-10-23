@@ -18,9 +18,9 @@ enum_: "enum" NAME "{" NAME+ "}"
 interfaces_: "interface" NAME "{" interface_function+ "}"
 interface_function: NAME function_declaration
 
-operator: "operator" operator_type function_declaration "{" statement* "}"
+operator: "operator" operator_type function_declaration "{" statements "}"
 operator_type: "free" -> operator_free
-                | "init" -> operator_init
+             | "init" -> operator_init
 
 struct: "struct" NAME "{" struct_body "}"
 struct_body:(variable_declaration|embed)*
@@ -34,15 +34,17 @@ alias_declaration: [decorations] NAME "=" (type_declaration_ | function_declarat
 // Post processor
 ast_decorator: "decorator" NAME "(" "__AST__" NAME "," "__AST__" NAME "," "__AST__" NAME ")" "{" (assign|function_call|method_call)* "}"
 
-type_declaration_: [IS_CONST] NAME ["<" typelist ">"] [type_static_array]
+type_declaration_: [IS_CONST|IS_MUTATE] type_structure
+?type_structure: NAME ["<" typelist ">"] [type_static_array]
 typelist: type_declaration_ ("," type_declaration_)*
 IS_CONST: "const"
+IS_MUTATE: "mut"
 type_static_array: "[" DEC_NUMBER "]"
 
-assign: (variable_declaration|molecule) "=" (test_expr|init_list)
-variable_init: [decorations] type_declaration_ NAME ["(" arglist ")"]
+assign: molecule "=" test_expr
+variable_definition: (IS_CONST|IS_MUTATE) type_structure NAME "=" (test_expr|init_list)
 init_list: "{}" -> init_default
-            | "{" arglist "}"
+         | "{" arglist "}"
     
 variable_declaration: type_declaration_ NAME
 embed: "embed" NAME
@@ -50,14 +52,14 @@ function_declaration: paramlist ["->" type_declaration_]
 function: NAME function_declaration "{" statements "}"
 statements: statement*
 ?statement: assign
-            | variable_init
-            | return
-            | function_call
-            | method_call
-            | for_declaration
-            | while
-            | if_declaration
-            | loop
+          | variable_definition
+          | return
+          | function_call
+          | method_call
+          | for_declaration
+          | while
+          | if_declaration
+          | loop
 paramlist : ("(" variable_declaration ("," variable_declaration)* ")" | "()")
 
 decorations : "[[" decoration ("," decoration)* "]]"

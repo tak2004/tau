@@ -237,3 +237,7 @@ class If(ASTNode):
     test: ASTNode
     thenBlock: List[ASTNode]
     elseBlock: List[ASTNode]
+
+@dataclass
+class InitDefault(ASTNode):
+    pass

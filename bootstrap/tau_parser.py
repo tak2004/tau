@@ -35,10 +35,22 @@ class TranformToNodes(Transformer):
         return GetEnumValue(s[0],s[1])
     def assign(self, s):
         return AssignOperation(s[0],s[1])
-    def variable_init(self, s):
-        return AssignOperation(Variable(s[0],s[1],s[2]), FunctionCall(ID("init"+s[1].id.name), s[3]))
+    def IS_CONST(self,s):
+        return True
+    def IS_MUTATE(self, s):
+        return False
+    def variable_definition(self, s):
+        typeDecl = TypeDeclaration(s[0],s[1][0],[] if s[1][1] == None else s[1][1], 0 if s[1][2] == None else s[1][2])
+        initValue = s[3]
+        if isinstance(s[3], InitDefault):
+            initValue = FunctionCall(ID("init"+typeDecl.id.name),[])
+        if isinstance(s[3], InitList):
+            initValue = FunctionCall(ID("init"+typeDecl.id.name),s[3].values)
+        return AssignOperation(Variable([],typeDecl,s[2]), initValue)
     def variable_declaration(self, s):
         return Variable([], s[0], s[1])
+    def type_structure(self,s):
+        return s
     def operator(self, s):
         if s[0].data == "operator_init":
             functionName:str = s[0].data.split('_')[1]
@@ -46,12 +58,12 @@ class TranformToNodes(Transformer):
             if len(s[1].parameters) > 1:
                 parameters = s[1].parameters[1:]
             code = [s[1].parameters[0]]
-            code.extend(s[2:])
+            code.extend(s[2])
             code.append(Return(s[1].parameters[0].id))
             return Function(ID(functionName+s[1].parameters[0].typeID.id.name),FunctionDeclaration(parameters,s[1].parameters[0].typeID),code)
         if s[0].data == "operator_free":
             functionName:str = s[0].data.split('_')[1]
-            return Function(ID(functionName+s[1].parameters[0].typeID.id.name),FunctionDeclaration(s[1].parameters,None),s[2:])
+            return Function(ID(functionName+s[1].parameters[0].typeID.id.name),FunctionDeclaration(s[1].parameters,None),s[2])
         return None
     def for_declaration(self, s):
         return For(s[0],s[1:])
@@ -70,7 +82,7 @@ class TranformToNodes(Transformer):
     def enum_(self, s):
         return Enum(s[0],s[1:])
     def type_declaration_(self, s):
-        return TypeDeclaration(False if s[0] == None else True, s[1], s[2] if s[2] != None else [], 0 if s[3] == None else s[3])
+        return TypeDeclaration(s[0], s[1][0], s[1][1] if s[1][1] != None else [], 0 if s[1][2] == None else s[1][2])
     def string(self, s):
         return StringLiteral(s[0])
     def number(self, s):
@@ -555,7 +567,7 @@ def build(input, module_directory:str = 'tau/', cache_directory:str = 'tau/', ta
             exit(1) 
         ObtainLifetime(module)
         # Process all operations which can be done at compile time.
-        ResolveCompiletimeExpressions().bottom_up(module)      
+        #ResolveCompiletimeExpressions().bottom_up(module)      
         # Generate module.
         moduleFile = module_directory+'/'+module.module+'.taum'
         moduleBytes = 0

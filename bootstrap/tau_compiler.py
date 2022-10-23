@@ -420,9 +420,9 @@ def compile(unit: Unit, f, tau_directory:str) -> bool:
     linker_options="/nologo /NODEFAULTLIB /MANIFEST:NO /DYNAMICBASE:NO /FIXED /EMITPOGOPHASEINFO /emittoolversioninfo:no /ALIGN:16 /stub:\"%s\" \"kernel32.lib\"" %(tau_directory+'backend/vc++/msdos_stub.exe')
     print(os.popen("\""+envScript+"\" & \""+"cl.exe"+"\" "+compiler_options+" /I \gc_cache "+f+" /link "+linker_options+" /entry:run /SUBSYSTEM:CONSOLE").read())
     # debug
-    compiler_options="/MTd /Zi /GF /GL /GS- /sdl- /EHa- /EHs-c- /D_HAS_EXCEPTIONS=0 /W3 /std:c++latest"
-    fout = Path(f).name[:-4]+"d.exe"
-    print(os.popen("\""+envScript+"\" & \""+"cl.exe"+"\" "+compiler_options+" /I \gc_cache "+f+" /Fe:"+fout+" /link "+linker_options+" /entry:run /SUBSYSTEM:CONSOLE").read())
+    #compiler_options="/MTd /Zi /GF /GL /GS- /sdl- /EHa- /EHs-c- /D_HAS_EXCEPTIONS=0 /W3 /std:c++latest"
+    #fout = Path(f).name[:-4]+"d.exe"
+    #print(os.popen("\""+envScript+"\" & \""+"cl.exe"+"\" "+compiler_options+" /I \gc_cache "+f+" /Fe:"+fout+" /link "+linker_options+" /entry:run /SUBSYSTEM:CONSOLE").read())
     return True
 
 def build(input, module_directory:str = 'tau/', cache_directory:str = 'tau/', tau_directory:str = './',  linkModule:str = None):

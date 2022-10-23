@@ -18,6 +18,8 @@ aliases {
     GetProcessHeap = () -> ptr<void>
     HeapAlloc = (ptr<void> Heap, i32 Flags, size Bytes) -> ptr<u8>
     HeapFree = (ptr<void> Heap, i32 Flags, ptr<void> Mem) -> bool
+    QueryPerformanceCounter = (ptr<u64> PerformanceCount) -> bool
+    QueryPerformanceFrequency = (ptr<u64> Frequence) -> bool
 }
 
 struct mem{
@@ -28,8 +30,8 @@ struct mem{
 
 // constructor
 operator init(mem Self, size Bytes){
-    auto heap = GetProcessHeap()
-    auto memory = HeapAlloc(heap, 0, Bytes)
+    const auto heap = GetProcessHeap()
+    mut auto memory = HeapAlloc(heap, 0, Bytes)
     Self.data = memory
     Self.bytes = Bytes
     Self.references = 1
@@ -38,7 +40,7 @@ operator init(mem Self, size Bytes){
 // destructor
 operator free(mem Self){
     if Self.references == 1 {
-        auto heap = GetProcessHeap()
+        const auto heap = GetProcessHeap()
         HeapFree(heap, 0, Self.data)
         Self.data = nullptr
         Self.bytes = 0
@@ -51,19 +53,6 @@ operator free(mem Self){
 use "process"
 use "console"
 use "arena"
-/*
-lexer(mem Buffer){
-    u8[] terminals = {':', '?', '*', '|', '(', ')', '{, '}', ',', '+','[',']'}
-    strlit[] keywords = {"%ignore", "%import"}
-    auto bytes = Buffer.bytes
-    for c in [0:bytes]{
-        console().log(Buffer.data[c])
-    }
-}*/
-
-load_grammar(mem Buffer, strlit Root, bool MaybePlaceholder)->bool{
-    return true
-}
 
 struct TokenLocationInfo{
     u64 Offset
@@ -106,7 +95,7 @@ printNode(Node Node, TokenList Tokens, ptr<u8> Buffer, size Bytes, size Depth){
 }*/
 
 printTokenList(TokenList Tokens){
-    size i = Tokens.left.elements
+    mut size i = Tokens.left.elements
     for t in [0:i]{
         console().log(Tokens.left[t].toString())
         console().log(": start=")
@@ -123,51 +112,42 @@ printTokenList(TokenList Tokens){
 
 run(){
     // Define the memory management.
-    MEMORYSTATUSEX systemMemoryInfo
+    mut MEMORYSTATUSEX systemMemoryInfo = {}
     systemMemoryInfo.Length = sizeof(MEMORYSTATUSEX)
     GlobalMemoryStatusEx(ptr(systemMemoryInfo))
-    heap systemAllocator(systemMemoryInfo.TotalPhys/10*9)
-    pool pool(systemAllocator)
-    stack stack(systemAllocator)
-    frame lastFrame(systemAllocator)
-    frame currentFrame(systemAllocator)
+    mut heap systemAllocator = {systemMemoryInfo.TotalPhys/10*9}
+    mut pool pool = {systemAllocator}
+    mut stack stack = {systemAllocator}
+    mut frame lastFrame={systemAllocator}
+    mut frame currentFrame={systemAllocator}
 
-    auto lalr = "./resources/tau.lalr"    
-    auto file = CreateFileA(lalr.ptr.toConstU8(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY|FILE_FLAG_SEQUENTIAL_SCAN, nullptr)
-    auto readBytes = GetFileSize(file, nullptr)
-    mem buf(readBytes)
+    mut u64 start = 0
+    mut u64 stop = 0
+    mut u64 frequence = 0
+    QueryPerformanceFrequency(ptr(frequence))
+
+    QueryPerformanceCounter(ptr(start))
+    const auto lalr = "./frontend/main.tau"    
+    const auto file = CreateFileA(lalr.ptr.toConstU8(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY|FILE_FLAG_SEQUENTIAL_SCAN, nullptr)
+    const auto readBytes = GetFileSize(file, nullptr)
+    mut mem buf = {readBytes}
     ReadFile(file, buf.data, readBytes, ptr(readBytes), nullptr)
     CloseHandle(file)
 
-    //auto parser = load_grammar(buf, "unit_", true)
-    auto tokens = lexer(buf.data, buf.bytes, true, true)
+    //QueryPerformanceCounter(ptr(start))
+    const auto tokens = lexer(buf.data, buf.bytes, true, true)
+    mut vec<Node> nodePool = {}
+    const ptr<Node> parseTree = parser(tokens, nodePool, buf.data, buf.bytes)
+    QueryPerformanceCounter(ptr(stop))
+    const auto usec = ((stop-start)*1000000)/frequence
+
     //printTokenList(tokens)
-    vec<Node> nodePool
-    ptr<Node> parseTree = parser(tokens, nodePool, buf.data, buf.bytes)
-    //parseTree.topDown(printNode, tokens, buf.data, buf.bytes)
-    auto tauLexer = parseTree.compile(nodePool, tokens, buf.data, buf.bytes)
-    auto i = tauLexer.Ignore.elements
-    for t in [0:i]{
-        console().log(tauLexer.Ignore[t].toString())
-        console().log("\n")
-    }
-    i = tauLexer.Terminals.elements
-    for p in [0:i]{
-        console().log(tauLexer.Terminals[p].toString())
-        console().log("\n")
-    }
+    parseTree.topDown(printNode, tokens, buf.data, buf.bytes)
+    console().log(usec.toString())
+    console().log("usec\n")
 
-    auto codeFilename = "./frontend/main.tau"    
-    auto codefile = CreateFileA(codeFilename.ptr.toConstU8(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY|FILE_FLAG_SEQUENTIAL_SCAN, nullptr)
-    readBytes = GetFileSize(codefile, nullptr)
-    mem code(readBytes)
-    ReadFile(codefile, code.data, readBytes, ptr(readBytes), nullptr)
-    CloseHandle(codefile)
-    auto codeTokens = tauLexer.tokenize(code.data,readBytes,true)
-    printTokenList(codeTokens)
-
-    vec<strview> argv
-    i = GetCommandLineA().split(" ", argv)
+    const vec<strview> argv = {}
+    const auto i = GetCommandLineA().split(" ", argv)
     //console().log(argv.capacity.toString())
     //console().log("\x1b[38;2;0;200;0m")
     for j in [1:i] {
