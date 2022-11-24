@@ -1,0 +1,15 @@
+module tests
+
+run(){
+    for i in range(10){
+
+    }
+    
+    for auto i = 0; i < 10; i=i+1 {
+
+    }
+
+    for ;; {
+
+    }
+}

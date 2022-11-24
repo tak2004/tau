@@ -1,0 +1,21 @@
+module tests
+
+run(){
+    auto i = 0
+    
+    if (i < 10) {
+        i = 10
+    }
+    
+    if (i < 10) {
+        i = 11
+    } else {
+        i = 9
+    }
+
+    if (i < 10) {
+        i = 0
+    } else {
+        i = 11
+    }
+}

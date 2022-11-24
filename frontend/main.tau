@@ -120,7 +120,7 @@ run(){
     mut stack stack = {systemAllocator}
     mut frame lastFrame={systemAllocator}
     mut frame currentFrame={systemAllocator}
-
+test()
     mut u64 start = 0
     mut u64 stop = 0
     mut u64 frequence = 0
@@ -136,13 +136,13 @@ run(){
 
     //QueryPerformanceCounter(ptr(start))
     const auto tokens = lexer(buf.data, buf.bytes, true, true)
-    mut vec<Node> nodePool = {}
-    const ptr<Node> parseTree = parser(tokens, nodePool, buf.data, buf.bytes)
+    //mut vec<Node> nodePool = {}
+    //const ptr<Node> parseTree = parser(tokens, nodePool, buf.data, buf.bytes)
     QueryPerformanceCounter(ptr(stop))
     const auto usec = ((stop-start)*1000000)/frequence
 
-    //printTokenList(tokens)
-    parseTree.topDown(printNode, tokens, buf.data, buf.bytes)
+    printTokenList(tokens)
+    //parseTree.topDown(printNode, tokens, buf.data, buf.bytes)
     console().log(usec.toString())
     console().log("usec\n")
 
