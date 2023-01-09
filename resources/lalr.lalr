@@ -1,0 +1,59 @@
+unit_: (lexer_rule | parser_rule | directive | COMMENT)+
+
+lexer_rule: LEXER_NAME ["." PRIORITY] ":" lexer_terminal+
+lexer_terminal: lexer_molecule lexer_terminal_right?
+lexer_terminal_right: "|" lexer_molecule lexer_terminal_right? -> lexer_or
+lexer_molecule: lexer_atom
+              | lexer_molecule "+" -> one_or_more
+              | lexer_molecule "*" -> zero_or_more
+              | lexer_molecule "?" -> zero_or_one
+lexer_atom:"(" lexer_terminal+ ")" -> lexer_subexpression
+          | STRING
+          | LITERAL_RANGE
+          | LEXER_NAME
+
+parser_rule: PARSER_NAME ":" parser_terminal
+parser_terminal: parser_molecule parser_terminal_right?
+parser_terminal_right: "|" parser_molecule parser_terminal_right? -> parser_or
+parser_molecule: parser_atom
+               | parser_molecule "+" -> one_or_more
+               | parser_molecule "*" -> zero_or_more
+               | parser_molecule "?" -> zero_or_one
+               | parser_molecule "~" PRIORITY -> exactly_n
+               | parser_molecule "~" PRIORITY ".." PRIORITY -> between_n_and_m
+parser_atom: "(" parser_terminal+ ")" -> parser_group
+           | "[" parser_terminal+ "]" -> parser_match
+           | STRING
+           | LITERAL_RANGE
+           | LEXER_NAME
+           | PARSER_NAME
+
+directive: ignore | import | declare | override | extend
+ignore: "%ignore" LEXER_NAME
+import: "%import" MODULE "." LEXER_NAME -> import_lexer_rule
+      | "%import" MODULE "." PARSER_NAME -> import_parser_rule
+      | "%import" MODULE "." LEXER_NAME "->" LEXER_NAME -> import_lexer_rule_as
+      | "%import" MODULE "." PARSER_NAME "->" PARSER_NAME -> import_parser_rule_as
+      | "%import" MODULE "(" (LEXER_NAME|PARSER_NAME)+ ")" -> import_rule_set
+declare: "%declare" LEXER_NAME
+override: "%override" LEXER_NAME ":" lexer_terminal -> override_lexer_rule
+        | "%override" PARSER_NAME ":" parser_terminal -> override_parser_rule
+extend: "%extend" LEXER_NAME ":" lexer_terminal -> extend_lexer_rule
+      | "%extend" PARSER_NAME ":" parser_terminal -> extend_parser_rule
+
+LITERAL_RANGE: "\"" ("^\"") "\"" ".." "\"" ("^\"") "\""
+// e.g. "a".."f" or "0".."9"
+STRING: "\"" ("^\"")+ "\""
+MODULE: ("a".."z")+
+LEXER_NAME: ("A".."Z"|"_"|"."|NUMBER)+
+PARSER_NAME: ("a".."z"|"_"|"."|NUMBER)+
+NEW_LINE: "\n" | "\r" | "\n\r"
+NUMBER: "0".."9"
+PRIORITY: NUMBER+
+WS: " "
+TAB: "\t"
+COMMENT: "//" /(^\n)*/
+
+%ignore WS
+%ignore TAB
+%ignore NEW_LINE

@@ -10,10 +10,10 @@ interface str{
     length()->size
     bytes()->size
     capacity()->size
-    //operator [](size Byte)->u8
+    /*operator [](size Byte)->u8*/
 }
 
-[[lib:"Kernel32.dll"]]
+[[lib:">Kernel32.dll<"]]
 aliases {
     GetProcessHeap = () -> ptr<void>
     HeapAlloc = (ptr<void> Heap, i32 Flags, size Bytes) -> ptr<u8>
@@ -28,7 +28,7 @@ struct mem{
     size references
 }
 
-// constructor
+/* constructor */
 operator init(mem Self, size Bytes){
     const auto heap = GetProcessHeap()
     mut auto memory = HeapAlloc(heap, 0, Bytes)
@@ -37,7 +37,7 @@ operator init(mem Self, size Bytes){
     Self.references = 1
 }
 
-// destructor
+/* destructor */
 operator free(mem Self){
     if Self.references == 1 {
         const auto heap = GetProcessHeap()
@@ -50,9 +50,9 @@ operator free(mem Self){
     }
 }
 
-use "process"
-use "console"
-use "arena"
+use ">process<"
+use ">console<"
+use ">arena<"
 
 struct TokenLocationInfo{
     u64 Offset
@@ -98,20 +98,22 @@ printTokenList(TokenList Tokens){
     mut size i = Tokens.left.elements
     for t in [0:i]{
         console().log(Tokens.left[t].toString())
-        console().log(": start=")
+        console().log(">: start=<")
         console().log(Tokens.right[t].Offset.toString())
-        console().log(" bytes=")
+        console().log("> bytes=<")
         console().log(Tokens.right[t].Bytes.toString())
-        console().log(" column=")
+        console().log("> column=<")
         console().log(Tokens.right[t].Column.toString())
-        console().log(" line=")
+        console().log("> line=<")
         console().log(Tokens.right[t].Line.toString())
-        console().log("\n")
+        console().log(">\n<")
     }
+    console().log(i.toString())
+    console().log(">tokens\n<")
 }
 
 run(){
-    // Define the memory management.
+    /* Define the memory management. */
     mut MEMORYSTATUSEX systemMemoryInfo = {}
     systemMemoryInfo.Length = sizeof(MEMORYSTATUSEX)
     GlobalMemoryStatusEx(ptr(systemMemoryInfo))
@@ -120,48 +122,58 @@ run(){
     mut stack stack = {systemAllocator}
     mut frame lastFrame={systemAllocator}
     mut frame currentFrame={systemAllocator}
-test()
     mut u64 start = 0
     mut u64 stop = 0
     mut u64 frequence = 0
     QueryPerformanceFrequency(ptr(frequence))
-
+    
+    const auto lexerContext = prepareLexer()
+    
     QueryPerformanceCounter(ptr(start))
-    const auto lalr = "./frontend/main.tau"    
+    const auto lalr = ">./frontend/main.tau<"
     const auto file = CreateFileA(lalr.ptr.toConstU8(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY|FILE_FLAG_SEQUENTIAL_SCAN, nullptr)
     const auto readBytes = GetFileSize(file, nullptr)
     mut mem buf = {readBytes}
     ReadFile(file, buf.data, readBytes, ptr(readBytes), nullptr)
     CloseHandle(file)
-
-    //QueryPerformanceCounter(ptr(start))
-    const auto tokens = lexer(buf.data, buf.bytes, true, true)
-    //mut vec<Node> nodePool = {}
-    //const ptr<Node> parseTree = parser(tokens, nodePool, buf.data, buf.bytes)
     QueryPerformanceCounter(ptr(stop))
-    const auto usec = ((stop-start)*1000000)/frequence
+    const auto io_usec = ((stop-start)*1000000)/frequence
+    /*QueryPerformanceCounter(ptr(start))*/
+    const auto p = 50000
+    for j in [1:p] {
+        const auto tokens = lexer(lexerContext, buf.data, buf.bytes, true, true)
+    }
+    /* mut vec<Node> nodePool = {}
+    const ptr<Node> parseTree = parser(tokens, nodePool, buf.data, buf.bytes)*/
+    QueryPerformanceCounter(ptr(stop))
+    const auto total_usec = ((stop-start)*1000000)/frequence
 
-    printTokenList(tokens)
-    //parseTree.topDown(printNode, tokens, buf.data, buf.bytes)
-    console().log(usec.toString())
-    console().log("usec\n")
+    /* printTokenList(tokens) */
+    /*parseTree.topDown(printNode, tokens, buf.data, buf.bytes)*/
+    console().log(">read file <")
+    console().log(io_usec.toString())
+    console().log(">usec\n<")
+    
+    console().log(">total <")
+    console().log(total_usec.toString())
+    console().log(">usec\n<")
 
     const vec<strview> argv = {}
-    const auto i = GetCommandLineA().split(" ", argv)
-    //console().log(argv.capacity.toString())
-    //console().log("\x1b[38;2;0;200;0m")
+    const auto i = GetCommandLineA().split("> <", argv)
+    /*console().log(argv.capacity.toString())
+    console().log(">\x1b[38;2;0;200;0m<")*/
     for j in [1:i] {
-        //console().log("Input "+j+" is: "+argv[j]+"\n")
+        /*console().log(">Input <"+j+"> is: <"+argv[j]+">\n<")*/
         console().log(argv[j])
     }
-//    console().log("\x1b[39m")
-//    console().log(process().parameters.elements.toString())
-//    for p in process().parameters {
-//        console().log(p)
-//    }
+/*    console().log(">\x1b[39m<")
+    console().log(process().parameters.elements.toString())
+    for p in process().parameters {
+        console().log(p)
+    }*/
 
-    //u64 frame = 0
-    //loop{
-    //    frame = frame + 1
-    //}
+    /*u64 frame = 0
+    loop{
+        frame = frame + 1
+    }*/
 }

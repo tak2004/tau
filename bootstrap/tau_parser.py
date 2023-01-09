@@ -93,8 +93,8 @@ class TranformToNodes(Transformer):
         return int(s)
     def HEX_NUMBER(self, s):
         return int(s,16)
-    def ESCAPED_STRING(self, s):
-        return s[1:-1]
+    def STRING_LITERAL(self, s):
+        return s[2:-2]
     def logic_or(self, s):
         if len(s) > 1:
             s[1].left = s[0]

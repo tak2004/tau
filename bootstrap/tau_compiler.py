@@ -416,7 +416,7 @@ class ASTToCpp(Visitor):
 
 def compile(unit: Unit, f, tau_directory:str) -> bool:
     envScript = r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
-    compiler_options="/MT /Zc:inline /GF /GL /GS- /sdl- /EHa- /EHs-c- /D_HAS_EXCEPTIONS=0 /O2 /W3 /std:c++latest"
+    compiler_options="/MT /Zi /Zc:inline /GF /GS- /sdl- /EHa- /EHs-c- /D_HAS_EXCEPTIONS=0 /O2 /W3 /std:c++latest"
     linker_options="/nologo /NODEFAULTLIB /MANIFEST:NO /DYNAMICBASE:NO /FIXED /EMITPOGOPHASEINFO /emittoolversioninfo:no /ALIGN:16 /stub:\"%s\" \"kernel32.lib\"" %(tau_directory+'backend/vc++/msdos_stub.exe')
     print(os.popen("\""+envScript+"\" & \""+"cl.exe"+"\" "+compiler_options+" /I \gc_cache "+f+" /link "+linker_options+" /entry:run /SUBSYSTEM:CONSOLE").read())
     # debug
@@ -446,6 +446,8 @@ def build(input, module_directory:str = 'tau/', cache_directory:str = 'tau/', ta
     if linkModule != None:
         cpp_stub = tau_directory+'backend/vc++/builtin.cpp'
         shutil.copy(cpp_stub, cache_directory)
+        cpp_generated = tau_directory+'backend/vc++/tokenizer.ipp'
+        shutil.copy(cpp_generated, cache_directory)
         compile(module, linkModule, tau_directory)
 
 if __name__ == '__main__':

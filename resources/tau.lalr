@@ -10,7 +10,7 @@ module: "module" NAME
         | interfaces_
         | enum_
 
-use: "use" (ESCAPED_STRING | match) ("," (ESCAPED_STRING | match))*
+use: "use" (STRING_LITERAL | match) ("," (STRING_LITERAL | match))*
 match: "match"
 
 enum_: "enum" NAME "{" NAME+ "}"
@@ -63,7 +63,7 @@ statements: statement*
 paramlist : ("(" variable_declaration ("," variable_declaration)* ")" | "()")
 
 decorations : "[[" decoration ("," decoration)* "]]"
-?decoration: NAME [":" (DEC_NUMBER | ESCAPED_STRING)]
+?decoration: NAME [":" (DEC_NUMBER | STRING_LITERAL)]
 
 function_call: NAME "(" [arglist] ")"
 method_call: molecule "." NAME "(" [arglist] ")"
@@ -125,26 +125,31 @@ term_right: "*" factor term_right? -> mul
         | NAME         
         | HEX_NUMBER -> number
         | DEC_NUMBER -> number
-        | ESCAPED_STRING -> string         
+        | STRING_LITERAL -> string         
 
-subscript_list: "[" SIGNED_DEC_NUMBER "]" -> subscript_offset
+subscript_list: "[" ["-"] DEC_NUMBER "]" -> subscript_offset
                 | subscript_slice
                 | "[" NAME "]" -> subscript_variable
 subscript_slice: "[" molecule ":" molecule "]"
-SIGNED_DEC_NUMBER: ["-"] DEC_NUMBER
-DEC_NUMBER: "1".."9" ("0".."9")*
-          | "0"
-HEX_NUMBER.1: "0x" ("0".."9"|"a".."f"|"A".."F")+
+// SIGNED_DEC_NUMBER: ["-"] DEC_NUMBER
+DEC_NUMBER: DIGIT+
+HEX_NUMBER.1: "0x" (DIGIT|"a".."f" | "A".."F")+
 arglist: test_expr ("," test_expr)*
 // The NEW_LINE tokenizer rule is associated to a new line action.
-NEW_LINE: "\n" | "\r" | "\n\r"
-WS: " " | "\t"
+CARRIAGE_RETURN: "\r"
+NEW_LINE: "\n"
+WS: " "
+TAB: "\t"
+DIGIT: "0".."9"
+STRING_LITERAL: /">(.|\n)*?<"/
 
-%import common.ESCAPED_STRING
+// %import common.ESCAPED_STRING
 %import common.CNAME -> NAME
 %ignore WS
+%ignore TAB
 %ignore NEW_LINE
-%import common.CPP_COMMENT
+%ignore CARRIAGE_RETURN
+// %import common.CPP_COMMENT
 %import common.C_COMMENT
-%ignore CPP_COMMENT
+// %ignore CPP_COMMENT
 %ignore C_COMMENT

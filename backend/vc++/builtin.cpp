@@ -8,6 +8,17 @@ extern "C"
     __declspec(dllimport) int_fast32_t WriteConsoleA(void* ConsoleOutput,const void* Buffer,uint_fast32_t NumberOfCharsToWrite,uint_fast32_t* NumberOfCharsWritten,void* Reserved);
 }
 
+#pragma function(memset)
+void *memset(void *dest, int c, size_t count)
+{
+    char *bytes = (char *)dest;
+    while (count--)
+    {
+        *bytes++ = (char)c;
+    }
+    return dest;
+}
+
 void print(const void* Text, size_t bytes){
     void* handle = GetStdHandle(-11);
     WriteConsoleA(handle, Text, bytes+1,0,0);
@@ -109,6 +120,10 @@ struct vec{
     size_t capacity;
     
     T& operator[](int Index){
+        return data[Index];
+    }
+
+    const T& operator[](int Index)const{
         return data[Index];
     }
 };
@@ -272,7 +287,20 @@ struct Lexer;
 
 using TokenList = pair<vec<uint8_t>,vec<TokenLocationInfo>>;
 
-TokenList lexer(uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool GenerateTokenInfos = false);
+struct Bucket{
+    uint8_t Entries;
+    uint8_t Values[15];
+};
+
+struct LexerContext{
+    vec<uint8_t> KeywordLookup;// [0-65535]
+    vec<Bucket> Bucket;// [0-LastBucketIndex]
+    uint8_t  LastBucketIndex;    
+};
+
+LexerContext prepareLexer();
+
+TokenList lexer(const LexerContext& Context, uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool GenerateTokenInfos = false);
 
 template<class T>
 T* parser(TokenList& Tokens, vec<T>& pool,uint8_t* Buffer, size_t Bytes);
@@ -286,16 +314,266 @@ void bottomUp(const Node* Node, TreeFunction Function, TokenList& Tokens,
               uint8_t* Buffer, size_t Bytes, size_t Depth = 0);
 
 void printNode(const Node* Node, TokenList& Tokens, uint8_t* Buffer, size_t Bytes, size_t Depth);
-void test();
 #endif
 #ifdef __POST
+#define NOPE
+#ifdef NOPE
+#include "tokenizer.ipp"
+bool memoryCompare(const void* Source, size_t SourceOffset, size_t SourceBytes, 
+                   const void* Target, size_t TargetOffset, size_t TargetBytes,
+                   size_t CompareBytes){
+    if ((SourceBytes - SourceOffset) >= CompareBytes &&
+        (TargetBytes - TargetOffset) >= CompareBytes){
+        for (auto i = 0; i < CompareBytes; ++i){
+            if (reinterpret_cast<const uint8_t*>(Source)[SourceOffset+i]!=reinterpret_cast<const uint8_t*>(Target)[TargetOffset+i]){
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+//extern "C" int __cdecl memcmp(const void* lhs, const void* rhs, size_t count);
+//#pragma intrinsic(_mm_cmpistrm)
+/*
+#include <immintrin.h>
+
+bool memoryCompare2(const void* Source, size_t SourceOffset, size_t SourceBytes, 
+                    const void* Target, size_t TargetOffset, size_t TargetBytes,
+                    size_t CompareBytes){
+    // Target is a keyword which is aligned and need no offset.
+    auto a = _mm_loadu_si128(reinterpret_cast<const __m128i*>(Target));
+
+    const __m128i* src = reinterpret_cast<const __m128i*>(Source)+(SourceOffset/16);
+    auto b = _mm_loadu_si128(src);    
+    auto c = _mm_loadu_si128(src++);
+
+    const int mode = _SIDD_UBYTE_OPS | _SIDD_CMP_EQUAL_ORDERED  | _SIDD_BIT_MASK;
+    __m128i returnValue =_mm_cmpestrm(a,CompareBytes,b,16,mode);
+    uint64_t mask = _mm_cvtsi128_si64(returnValue);
+    return (mask >> (SourceOffset & 15)) & 1 == 1;
+}
+*/
+constexpr uint8_t skipables[5]={0,1,2,3,64};
+
+LexerContext prepareLexer(){
+    LexerContext result;
+    // init lookup
+    result.KeywordLookup = initvec<uint8_t>();
+    resize(result.KeywordLookup,65535);
+    for (auto i = 0; i < 65535; ++i){
+        result.KeywordLookup[i] = 0;
+    }
+    // sort data
+    result.Bucket = initvec<Bucket>();
+    // add empty bucket
+    auto& e = add(result.Bucket);
+    e.Entries = 0;
+    result.LastBucketIndex++;
+    // add sorted buckets
+    for (auto i = 0; i < KEYWORDS_COUNT; ++i){
+        uint16_t key = (static_cast<uint16_t>(KEYWORDS[i][0])<<8)+KEYWORDS[i][1];
+        auto bucketIndex = result.KeywordLookup[key];
+        if (bucketIndex == 0){
+            auto& e = add(result.Bucket);
+            e.Entries = 0;
+            result.KeywordLookup[key] = result.LastBucketIndex;
+            bucketIndex = result.LastBucketIndex;
+            result.LastBucketIndex++;
+        }        
+        result.Bucket[bucketIndex].Values[result.Bucket[bucketIndex].Entries] = i;
+        result.Bucket[bucketIndex].Entries++;
+    }
+    return result;
+}
+
+TokenList lexer(const LexerContext& Context, uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool GenerateTokenInfos){
+    TokenList result;
+    result.left = initvec<uint8_t>();
+    resize(result.left,1000);
+    result.right = initvec<TokenLocationInfo>();
+    resize(result.right,1000);
+    // token infos
+    uint64_t col = 1;
+    uint64_t line = 1;
+    const size_t SkipablesCount = 5;
+
+    for (auto c = 0; c < Bytes;){
+        uint8_t terminal = 255;
+        auto start = c;
+        uint64_t processedLines = 0;
+        uint64_t processedLineColumns = 0;
+        // Check expressions.
+        for (auto i = 0; i < REGULAR_EXPRESSION_COUNT; ++i){
+            switch (i)
+            {
+            case 0:// Comment
+                if (Buffer[start] == '/' && Buffer[start+1] == '*'){
+                    c=start+2;
+                    while(Buffer[c] != '*' && Buffer[c+1] != '/'){
+                        if (Buffer[c] == '\n'){
+                            processedLines++;
+                            processedLineColumns = 0;
+                        }
+                        c++;
+                        processedLineColumns++;
+                    }
+                    c+=2;
+                    terminal = SINGLE_CHARACTER_TERMINALS_COUNT+KEYWORDS_COUNT+i;
+                }
+                break;
+            case 1: // StringLiteral
+                if (Buffer[start] == '"' && Buffer[start+1] == '>'){
+                    c=start+2;
+                    while(Buffer[c] != '<' && Buffer[c+1] != '"'){
+                        if (Buffer[c] == '\n'){
+                            processedLines++;
+                            processedLineColumns = 0;
+                        }
+                        c++;
+                        processedLineColumns++;
+                    }
+                    c+=2;
+                    terminal = SINGLE_CHARACTER_TERMINALS_COUNT+KEYWORDS_COUNT+i;
+                }
+                break;
+            case 2: // HEX_NUMBER
+                if (Buffer[start] == '0' && (Buffer[start+1] == 'x' || Buffer[start+1] == 'X')){
+                    auto lookAhead = 0;
+                    for(;;lookAhead++){
+                        switch(Buffer[start+lookAhead]){
+                        // hex-letter
+                        case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': 
+                        case 'a': case 'b': case 'c': case 'd': case 'e': case 'f':
+                        // digit
+                        case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+                            continue;
+                        }
+                        break;
+                    }            
+                    if (lookAhead > 0){
+                        c+=lookAhead;
+                        terminal = SINGLE_CHARACTER_TERMINALS_COUNT+KEYWORDS_COUNT+i;
+                    }                    
+                }
+                break;
+            case 3: // DEC_NUMBER
+                {
+                    auto lookAhead = 0;
+                    for(;;lookAhead++){
+                        switch(Buffer[start+lookAhead]){
+                        // digit
+                        case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+                            continue;
+                        }
+                        break;
+                    }            
+                    if (lookAhead > 0){
+                        c+=lookAhead;
+                        terminal = SINGLE_CHARACTER_TERMINALS_COUNT+KEYWORDS_COUNT+i;
+                    }    
+                }
+                break;
+            case 4: // Name
+                auto lookAhead = 0;
+                for(;;lookAhead++){
+                    switch(Buffer[start+lookAhead]){
+                    // letter
+                    case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I':
+                    case 'J': case 'K': case 'L': case 'M': case 'N': case 'O': case 'P': case 'Q': case 'R':
+                    case 'S': case 'T': case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z': 
+                    case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': 
+                    case 'j': case 'k': case 'l': case 'm': case 'n': case 'o': case 'p': case 'q': case 'r': 
+                    case 's': case 't': case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
+                    // digit
+                    case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+                    // underscore
+                    case '_':
+                        continue;
+                    }
+                    break;
+                }     
+                if (lookAhead > 0){
+                    c+=lookAhead;
+                    terminal = SINGLE_CHARACTER_TERMINALS_COUNT+KEYWORDS_COUNT+i;
+                }       
+                break;
+            }
+            if (terminal!=255){
+                break;
+            }
+        }
+        if (terminal==255){
+            // Check keywords.
+            uint16_t key = (static_cast<uint16_t>(Buffer[start])<<8)+Buffer[start+1];
+            auto bucketIndex = Context.KeywordLookup[key];
+            if (bucketIndex <= Context.LastBucketIndex){
+                auto& bucket = Context.Bucket[bucketIndex];
+                for (auto i = 0; i< bucket.Entries; i++){
+                    if (memoryCompare(Buffer,start,Bytes,KEYWORDS[bucket.Values[i]],0,KEYWORDS_SIZE[bucket.Values[i]],KEYWORDS_SIZE[bucket.Values[i]])){
+                        terminal = SINGLE_CHARACTER_TERMINALS_COUNT+bucket.Values[i];
+                        c=start+KEYWORDS_SIZE[i];
+                        break;
+                    }                    
+                }
+            }
+        }
+        if (terminal==255){
+            // Single byte terminals.
+            for (auto i = 0; i < SINGLE_CHARACTER_TERMINALS_COUNT; ++i){
+                if (Buffer[c] == SINGLE_CHARACTER_TERMINALS[i]){
+                    terminal = i;
+                    c+=1;
+                    break;
+                }
+            }
+        }
+        // The lexer can't process the current token.
+        if (terminal == 255){
+            c++;
+        }
+
+        bool skip = false;
+        if (IgnoreSkipables){
+            for (auto i = 0; i < SkipablesCount; ++i){
+                if (skipables[i] == terminal){
+                    skip = true;
+                    break;
+                }
+            }
+        }
+
+        if (skip == false){            
+            append(result.left, terminal);
+            if (GenerateTokenInfos){
+                TokenLocationInfo v = {start, c-start, line, col};
+                append(result.right, v);
+            }
+        }
+
+        if (GenerateTokenInfos){
+            if (terminal == (uint8_t)SingleCharacterTerminals::NEW_LINE){
+                col = 1;
+                line++;
+            } else {
+                col+=c-start;
+                if (processedLines != 0){
+                    line+=processedLines;
+                    col = processedLineColumns;
+                }
+            }
+        }
+    }
+    return result;
+}
+#else
 enum SingleCharacterTerminals:uint8_t{
     Comma=0, LeftBracket, RightBracket, Equal, Colon, Semicolon, Exclamationmark, Tilde,
     BitAnd, BitXor, Star, Pipe, LeftParenthesis, RightParenthesis, Plus, LeftSquareBracket,
     RightSquareBracket, DoubleQuotation, Percent, Minus, SmallerThan, GreaterThan, Underscore,
     Space, Tab, NewLine, Slash, CarriageReturn, Dot, Questionmark, EndOfStream
 };
-
 enum RangeTerminals : uint8_t{
     Letter = SingleCharacterTerminals::EndOfStream+1,
     Digit
@@ -321,7 +599,7 @@ enum MultipleCharacterTerminals: uint8_t{
     String,// ".*"
     HexNumber,// 0x (0..9 | a..f | A..F)+
     DecimalNumber,// (0..9)+
-    SinglelineComment,// // !(\r|\n)*
+    SinglelineComment,// // !(\r|\n)* 
     MultilineComment// /* .* */
 };
 
@@ -605,7 +883,10 @@ TokenList lexer(uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool Genera
     }
     return result;
 }
+#endif
 
+#ifdef NOPE
+#else
 enum class NodeKind:uint8_t{
     Unit=0, Module, Name, Struct, Function, Constants, Aliases, AST_Decorator, Use, Operator,
     Interface, Enum, String, Match, InterfaceFunction, FunctionDeclaration, ReturnType,
@@ -735,34 +1016,39 @@ void appendOperator(vec<uint8_t>& In, uint8_t Operator){
     append(In,static_cast<uint8_t>(Operator));
 }
 
-struct NFANode;
-
 struct NFATransition{
     uint8_t Input;
-    NFANode* Target;
-    NFATransition* Next;
+    NFATransition* Target;
+    NFATransition* ParallelTarget;
 };
 
-struct NFANode{
-    NFATransition* FirstTransition;
-};
+void patchTransition(NFATransition* Self, uint8_t Input, NFATransition* Target = nullptr, 
+                     NFATransition* ParallelTarget = nullptr){
+    Self->Input = Input;
+    Self->Target = Target;
+    Self->ParallelTarget = ParallelTarget;
+}
 
 struct NFA{
-    NFANode* Start;
-    NFANode* End;
+    NFATransition* Start;
+    NFATransition* End;
 };
 
 const uint8_t Empty = 255;
 
-NFA ConvertPostfixExpressionToNFA(vec<uint8_t>& PostfixExpression, vec<NFATransition>& TransitionPool, vec<NFANode>& NodePool){
-    NFA result={nullptr,nullptr};
-    
+NFA ConvertPostfixExpressionToNFA(vec<uint8_t>& PostfixExpression, vec<NFATransition>& TransitionPool){
+    NFATransition* endTransition = &add(TransitionPool);
+    patchTransition(endTransition,4); // 4 is ASCII End of Transmission
+
+    NFA result={nullptr, nullptr};
     NFA ruleStack[128];
     uint8_t ruleStackIndex = 0;
 
     for(auto i = 0; i < PostfixExpression.elements; ++i){
         switch (PostfixExpression[i]){
             case RegularExpressionOperator::ZeroOrMore:
+
+
                 result.Start = &add(NodePool);// new start
                 result.End = &add(NodePool);// new end
                 // new start ----> old start
@@ -856,13 +1142,18 @@ NFA ConvertPostfixExpressionToNFA(vec<uint8_t>& PostfixExpression, vec<NFATransi
                 --ruleStackIndex;
                 break;
             default:                
-                ruleStack[ruleStackIndex].Start=&add(NodePool);
-                ruleStack[ruleStackIndex].End=&add(NodePool);
-                ruleStack[ruleStackIndex].Start->FirstTransition=&add(TransitionPool);
-                ruleStack[ruleStackIndex].Start->FirstTransition->Input = PostfixExpression[i]-RegularExpressionOperator::Union-1;
-                ruleStack[ruleStackIndex].Start->FirstTransition->Target = ruleStack[ruleStackIndex].End;
-                ruleStack[ruleStackIndex].Start->FirstTransition->Next = nullptr;
-                ruleStack[ruleStackIndex].End->FirstTransition = nullptr;
+                ruleStack[ruleStackIndex].Start=&add(TransitionPool);
+
+                ruleStack[ruleStackIndex].Start->Input = PostfixExpression[i]-RegularExpressionOperator::Union-1;
+                ruleStack[ruleStackIndex].Start->Target = ruleStack[ruleStackIndex].End;
+                ruleStack[ruleStackIndex].Start->
+                //ruleStack[ruleStackIndex].Start=&add(NodePool);
+                //ruleStack[ruleStackIndex].End=&add(NodePool);
+                //ruleStack[ruleStackIndex].Start->FirstTransition=&add(TransitionPool);
+                //ruleStack[ruleStackIndex].Start->FirstTransition->Input = PostfixExpression[i]-RegularExpressionOperator::Union-1;
+                //ruleStack[ruleStackIndex].Start->FirstTransition->Target = ruleStack[ruleStackIndex].End;
+                //ruleStack[ruleStackIndex].Start->FirstTransition->Next = nullptr;
+                //ruleStack[ruleStackIndex].End->FirstTransition = nullptr;
                 ++ruleStackIndex;
                 break;
         }
@@ -1725,4 +2016,5 @@ void printNode(const Node* Node, TokenList& Tokens, uint8_t* Buffer, size_t Byte
     }
     print({"\n",1});
 }
+#endif
 #endif
