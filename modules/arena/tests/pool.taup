@@ -1,0 +1,8 @@
+module tests
+
+createAndFreePool(){
+    heap global
+    pool buckets(global)
+    auto buffer = buckets.allocate(32)
+    global.reset()
+}

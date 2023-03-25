@@ -127,7 +127,8 @@ run(){
     mut u64 frequence = 0
     QueryPerformanceFrequency(ptr(frequence))
     
-    const auto lexerContext = prepareLexer()
+    mut LexerContext lexerContext = {}
+    lexerContext.prepareLexer()
     
     QueryPerformanceCounter(ptr(start))
     const auto lalr = ">./frontend/main.tau<"
@@ -139,22 +140,32 @@ run(){
     QueryPerformanceCounter(ptr(stop))
     const auto io_usec = ((stop-start)*1000000)/frequence
     /*QueryPerformanceCounter(ptr(start))*/
-    const auto p = 50000
-    for j in [1:p] {
-        const auto tokens = lexer(lexerContext, buf.data, buf.bytes, true, true)
+    mut mem tokens = {readBytes}    
+    const auto p = 1000000
+    
+    for j in [0:p] {
+        /* LexerContextFreeGrammar(buf.data, buf.bytes, tokens.data) */
+        /* LexerCFG_SIMD_MP(lexerContext,buf.data, buf.bytes, tokens.data) */
+        /* LexerCFG_Regular_Expression(buf.data, buf.bytes, tokens.data) */
+        /* const auto tokens = lexer(lexerContext, buf.data, buf.bytes, true, true) */
     }
+    lexerContext.freeLexer()
     /* mut vec<Node> nodePool = {}
     const ptr<Node> parseTree = parser(tokens, nodePool, buf.data, buf.bytes)*/
     QueryPerformanceCounter(ptr(stop))
     const auto total_usec = ((stop-start)*1000000)/frequence
-
+    const auto total_bytes = lexerbytes(lexerContext)
     /* printTokenList(tokens) */
     /*parseTree.topDown(printNode, tokens, buf.data, buf.bytes)*/
     console().log(">read file <")
     console().log(io_usec.toString())
     console().log(">usec\n<")
     
-    console().log(">total <")
+    console().log(">total bytes <")
+    console().log(total_bytes.toString())
+    console().log(">bytes\n<")
+
+    console().log(">total time <")
     console().log(total_usec.toString())
     console().log(">usec\n<")
 
@@ -176,4 +187,5 @@ run(){
     loop{
         frame = frame + 1
     }*/
+    ExitProcess(0)
 }

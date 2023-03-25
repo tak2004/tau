@@ -1,0 +1,7 @@
+module tests
+
+createAndFreeHeap(){
+    heap global
+    auto buffer = global.allocate(1024)
+    global.reset()
+}

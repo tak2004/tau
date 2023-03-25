@@ -60,7 +60,7 @@ statements: statement*
           | while
           | if_declaration
           | loop
-paramlist : ("(" variable_declaration ("," variable_declaration)* ")" | "()")
+paramlist : ("(" variable_declaration ("," variable_declaration)* ")" | "(" ")")
 
 decorations : "[[" decoration ("," decoration)* "]]"
 ?decoration: NAME [":" (DEC_NUMBER | STRING_LITERAL)]

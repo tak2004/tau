@@ -1,0 +1,14 @@
+module tests
+
+createAndFreeFrame(){
+    heap global
+    frame currentFrame(global)
+    frame lastFrame(global)    
+    loop{
+        currentFrame.reset()
+        u8[32] stackBuffer
+        auto buffer = currentFrame.allocate(32)
+        //wait for lastFrame finish
+        currentFrame.swap(lastFrame)
+    }
+}

@@ -1,0 +1,32 @@
+~120usec io
+
+Generated Tokenizer
+
+170us memcompare true(fast skip of many bytes)
+640us memcompare false(byte by byte)
+760us memcompare implementation
+500us added comment rule
+450us added string literals rule
+250us added name rule
+200us early exit for rules
+190us full implementation
+220us fixed implementation
+190us optimized keywords comparement with a lookup table
+180us two byte tokens are part of the keywords now
+170us reserve the space for 1000 tokens upfront
+
+Handcrafted Tokenizer
+
+~210us 
+
+5017 Bytes * 10.000 = 1,26s ~40MB/s
+                    = 0,79s ~63MB/s <- keyword lookup table
+                    = 0,55s ~91MB/s <- two byte token are part of the keywords now
+                    = 0,39s ~127MB/s <- reserved space for 1k tokens upfront
+
+
+2,6s = 1528500000 Bytes ~ 588MB/s
+0,25 = 152850000 Bytes ~ 611MB/s
+
+5017 Bytes * 100.000 = 0,292s ~1.718MB/s <- just CFG Lexer 
+5500 Bytes * 1.000.000 = 0,55s ~10GB/s <- multi threading

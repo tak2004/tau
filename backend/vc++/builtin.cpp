@@ -1,12 +1,101 @@
 #ifdef __PRE
 #include <cstdint>
 #include <cmath>
+#include <intrin.h>
+#pragma intrinsic(_InterlockedIncrement)
+#pragma intrinsic(_InterlockedDecrement)
+#pragma intrinsic(_InterlockedIncrement64)
+#pragma intrinsic(_InterlockedDecrement64)
+#pragma intrinsic(_InterlockedCompareExchangePointer)
+#pragma intrinsic(__assume)
+
 extern "C"
 {
     uint32_t _tls_index{};
     __declspec(dllimport) void* GetStdHandle(int_fast32_t StdHandle);
     __declspec(dllimport) int_fast32_t WriteConsoleA(void* ConsoleOutput,const void* Buffer,uint_fast32_t NumberOfCharsToWrite,uint_fast32_t* NumberOfCharsWritten,void* Reserved);
+    __declspec(dllimport) void* CreateThread(void* lpThreadAttributes, size_t dwStackSize, void* lpStartAddress, void* lpParameter, uint32_t dwCreationFlags, uint32_t* lpThreadId);
+    __declspec(dllimport) void Sleep(int32_t ms);
+    __declspec(dllimport) int32_t GetCurrentProcessorNumber();
+    __declspec(dllimport) int32_t SetThreadAffinityMask(void* ThreadHandle, int32_t Mask);
+    __declspec(dllimport) int32_t WaitForSingleObject(void* ThreadHandle, int32_t Ms);
+    __declspec(dllimport) int32_t WaitForMultipleObjects(int32_t Count, void*const* ThreadHandle, bool WaitAll, int32_t Ms);
+    __declspec(dllimport) void ExitThread(int32_t ExitCode);    
 }
+
+#include <atomic>
+
+template<class T, uint32_t CNT>
+class SPSCQueue
+{
+public:
+    static_assert(CNT && !(CNT & (CNT - 1)), "CNT must be a power of 2");
+
+    T* alloc() {
+      if (write_idx - read_idx_cach == CNT) {
+        _mm_mfence();
+        read_idx_cach = read_idx;
+        //read_idx_cach = ((std::atomic<uint32_t>*)&read_idx)->load(std::memory_order_consume);
+        if (write_idx - read_idx_cach == CNT) { // no enough space
+          __assume(0);
+          return nullptr;
+        }
+      }
+      return &data[write_idx % CNT];
+    }
+
+    void push() {
+        _InterlockedIncrement((volatile long*)&write_idx);
+      //((std::atomic<uint32_t>*)&write_idx)->store(write_idx + 1, std::memory_order_release);
+    }
+
+    template<typename Writer>
+    bool tryPush(Writer writer) {
+      T* p = alloc();
+      if (!p) return false;
+      writer(p);
+      push();
+      return true;
+    }
+
+    template<typename Writer>
+    void blockPush(Writer writer) {
+      while (!tryPush(writer))
+        ;
+    }
+
+    T* front() {
+        auto tmp = write_idx;
+        _mm_mfence();
+        if (read_idx == tmp){
+        //if (read_idx == ((std::atomic<uint32_t>*)&write_idx)->load(std::memory_order_acquire)) {
+          return nullptr;
+        }
+        return &data[read_idx % CNT];
+    }
+
+    void pop() {
+      _InterlockedIncrement((volatile long*)&read_idx);
+      //((std::atomic<uint32_t>*)&read_idx)->store(read_idx + 1, std::memory_order_release);
+    }
+
+    template<typename Reader>
+    bool tryPop(Reader reader) {
+      T* v = front();
+      if (!v) return false;
+      reader(v);
+      pop();
+      return true;
+    }
+    alignas(128)uint64_t bytes = 0;
+  private:
+    alignas(128) T data[CNT] = {};
+
+    alignas(128) uint32_t write_idx = 0;
+    uint32_t read_idx_cach = 0; // used only by writing thread
+    
+    alignas(128) uint32_t read_idx = 0;
+};
 
 #pragma function(memset)
 void *memset(void *dest, int c, size_t count)
@@ -284,6 +373,7 @@ struct shortstring;
 struct TokenLocationInfo;
 struct Node;
 struct Lexer;
+struct Job;
 
 using TokenList = pair<vec<uint8_t>,vec<TokenLocationInfo>>;
 
@@ -292,13 +382,31 @@ struct Bucket{
     uint8_t Values[15];
 };
 
+struct Task{
+    uint8_t* Buffer;
+    uint8_t* Tokens;
+    size_t Bytes;
+};
+
+SPSCQueue<Task,4> ThreadJobs[11];
+
 struct LexerContext{
     vec<uint8_t> KeywordLookup;// [0-65535]
     vec<Bucket> Bucket;// [0-LastBucketIndex]
-    uint8_t  LastBucketIndex;    
+    uint8_t  LastBucketIndex;
+    uint8_t RoundRobin;
+    size_t ThreadCount;
+    SPSCQueue<Task,4>* ThreadJobs;
+    void** ThreadHandles;
 };
 
-LexerContext prepareLexer();
+LexerContext initLexerContext(){
+    return LexerContext{};
+}
+
+void prepareLexer(LexerContext& lexerContext);
+void freeLexer(LexerContext& lexerContext);
+uint64_t lexerbytes(LexerContext& lexerContext);
 
 TokenList lexer(const LexerContext& Context, uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool GenerateTokenInfos = false);
 
@@ -314,6 +422,8 @@ void bottomUp(const Node* Node, TreeFunction Function, TokenList& Tokens,
               uint8_t* Buffer, size_t Bytes, size_t Depth = 0);
 
 void printNode(const Node* Node, TokenList& Tokens, uint8_t* Buffer, size_t Bytes, size_t Depth);
+void LexerCFG_SIMD_MP(LexerContext& Context, uint8_t* Buffer, size_t Bytes, uint8_t* Tokens);
+void LexerCFG_Regular_Expression(uint8_t* Buffer, size_t Bytes, uint8_t* Tokens);
 #endif
 #ifdef __POST
 #define NOPE
@@ -334,60 +444,186 @@ bool memoryCompare(const void* Source, size_t SourceOffset, size_t SourceBytes,
     return false;
 }
 
-//extern "C" int __cdecl memcmp(const void* lhs, const void* rhs, size_t count);
-//#pragma intrinsic(_mm_cmpistrm)
-/*
-#include <immintrin.h>
-
-bool memoryCompare2(const void* Source, size_t SourceOffset, size_t SourceBytes, 
-                    const void* Target, size_t TargetOffset, size_t TargetBytes,
-                    size_t CompareBytes){
-    // Target is a keyword which is aligned and need no offset.
-    auto a = _mm_loadu_si128(reinterpret_cast<const __m128i*>(Target));
-
-    const __m128i* src = reinterpret_cast<const __m128i*>(Source)+(SourceOffset/16);
-    auto b = _mm_loadu_si128(src);    
-    auto c = _mm_loadu_si128(src++);
-
-    const int mode = _SIDD_UBYTE_OPS | _SIDD_CMP_EQUAL_ORDERED  | _SIDD_BIT_MASK;
-    __m128i returnValue =_mm_cmpestrm(a,CompareBytes,b,16,mode);
-    uint64_t mask = _mm_cvtsi128_si64(returnValue);
-    return (mask >> (SourceOffset & 15)) & 1 == 1;
-}
-*/
+uint32_t starting_workers = 0;
+bool running = false;
 constexpr uint8_t skipables[5]={0,1,2,3,64};
 
-LexerContext prepareLexer(){
-    LexerContext result;
-    // init lookup
-    result.KeywordLookup = initvec<uint8_t>();
-    resize(result.KeywordLookup,65535);
-    for (auto i = 0; i < 65535; ++i){
-        result.KeywordLookup[i] = 0;
-    }
-    // sort data
-    result.Bucket = initvec<Bucket>();
-    // add empty bucket
-    auto& e = add(result.Bucket);
-    e.Entries = 0;
-    result.LastBucketIndex++;
-    // add sorted buckets
-    for (auto i = 0; i < KEYWORDS_COUNT; ++i){
-        uint16_t key = (static_cast<uint16_t>(KEYWORDS[i][0])<<8)+KEYWORDS[i][1];
-        auto bucketIndex = result.KeywordLookup[key];
-        if (bucketIndex == 0){
-            auto& e = add(result.Bucket);
-            e.Entries = 0;
-            result.KeywordLookup[key] = result.LastBucketIndex;
-            bucketIndex = result.LastBucketIndex;
-            result.LastBucketIndex++;
+int32_t WorkerRunner(void* userdata){
+    LexerContext* context = static_cast<LexerContext*>(userdata);
+    auto threadIndex = GetCurrentProcessorNumber();
+    uint64_t hotLoop = 0;
+    mem tokens=initmem(4096);
+    while(running == 1 || context->ThreadJobs[threadIndex].front()){
+        if (context->ThreadJobs[threadIndex].front()){
+            Task* job = context->ThreadJobs[threadIndex].front();
+            LexerContextFreeGrammar(job->Buffer, job->Bytes, tokens.data);
+            context->ThreadJobs[threadIndex].bytes += job->Bytes;
+            context->ThreadJobs[threadIndex].pop();
+            hotLoop=0;
+        } else {
+            for (auto j = 0; j<(1024*(1<<hotLoop)); j++){}
+            hotLoop=(hotLoop+1)&7;
+            //::Sleep(1);
         }        
-        result.Bucket[bucketIndex].Values[result.Bucket[bucketIndex].Entries] = i;
-        result.Bucket[bucketIndex].Entries++;
+    }
+    return 0;
+}
+
+void LexerCFG_Regular_Expression(uint8_t* Buffer, size_t Bytes, uint8_t* Tokens) {
+	__m128i* p = reinterpret_cast<__m128i*>(Buffer);
+	__m128i* tokens = reinterpret_cast<__m128i*>(Tokens);
+	__m128i b,b2,a,a2;
+	uint32_t start = 0;
+	uint8_t state = 0,end =0;
+    a = _mm_load_si128(tokens);
+	b = _mm_load_si128(tokens + 1);
+	for (size_t i = 0; i < (Bytes / 32); ++i) {		
+        tokens += 2;        
+        a2 = _mm_load_si128(tokens);
+        // letters mask
+        //[v,-,-,-][-,-,-,-]
+        // digits mask
+        //[-,v,-,-][-,-,-,-]
+        // hexes mask
+        //[-,-,v,-][-,-,-,-]
+        // terminals mask
+        //[-,-,-,v][-,-,-,-]
+		b2 = _mm_load_si128(tokens + 1);
+        // keyword needle mask
+        //[-,-,-,-][v,v,-,-]
+		// expr needle masks
+		//[-,-,-,-][-,-,v,v]
+		auto leading = static_cast<uint64_t>(b.m128i_u32[2])<<32 | static_cast<uint64_t>(b2.m128i_u32[2]);
+		auto trailing = static_cast<uint64_t>(b.m128i_u32[3])<<32 | static_cast<uint64_t>(b2.m128i_u32[3]);
+		auto candidates = leading & (trailing >> 1);
+		auto offset = __lzcnt64(candidates);
+		while(offset < 32) {
+			auto index = 31-offset;
+			if (Buffer[i * 32 + index] == '/' && Buffer[i * 32 + index +1] == '*' && state == 0) {
+				// comment start
+				start = i * 32 + index;
+				state = 1;
+			}
+			if (Buffer[i * 32 + index] == '"' && Buffer[i * 32 + index +1] == '>' && state == 0) {
+				// string start
+				start = i * 32 + index;
+				state = 2;
+			}
+			if (Buffer[i * 32 + index] == '0' && Buffer[i * 32 + index +1] == 'x' && state == 0) {
+				// hexa decimal number
+				//start = i * 32 + offset;
+				//state = 3;
+			}
+			if (Buffer[i * 32 + index] == '*' && Buffer[i * 32 + index + 1] == '/' && state == 1) {
+				// comment end
+				end = i * 32 + index +1;
+				state = 0;
+			}
+			if (Buffer[i * 32 + index] == '<' && Buffer[i * 32 + index + 1] == '"' && state == 2) {
+				// string end
+				end = i * 32 + index + 1;
+				state = 0;
+			}
+			candidates = candidates & ~(1ull << (63-offset));
+			offset = __lzcnt64(candidates);
+		}
+		b = b2;
+        a = a2;
+	}
+}
+
+void LexerCFG_SIMD_MP(LexerContext& Context, uint8_t* Buffer, size_t Bytes, uint8_t* Tokens) {
+    auto chunks = ((Bytes-1)/4096)+1;
+    for (auto i = 0; i< chunks; ++i){
+        uint64_t hotLoop = 1;
+        auto tind = Context.RoundRobin % 11;
+        auto* job = Context.ThreadJobs[tind].alloc();
+        while(job == nullptr){
+            //::Sleep(1);
+            for (auto j = 0; j<(1024*(1<<hotLoop)); j++){}
+            job = Context.ThreadJobs[tind].alloc();
+            hotLoop=(hotLoop+1)&7;
+        }
+        job->Buffer = Buffer+(i*4096);
+        job->Tokens = Tokens+(i*4096);
+        job->Bytes = i < (chunks-1) ? 4096 : Bytes & 4095;
+        Context.ThreadJobs[tind].push();
+        Context.RoundRobin++;
+    }
+}
+
+int32_t Startup(void* userdata){
+    LexerContext* context = static_cast<LexerContext*>(userdata);
+    _InterlockedIncrement((volatile long*)&starting_workers);
+    while(running == false){
+        Sleep(1);
+    }
+    _InterlockedDecrement((volatile long*)&starting_workers);
+    return WorkerRunner(userdata);
+}
+
+uint64_t lexerbytes(LexerContext& lexerContext){
+    uint64_t result = 0;
+    for (auto i = 0; i< 11; ++i){
+        result+=lexerContext.ThreadJobs[i].bytes;
     }
     return result;
 }
 
+void prepareLexer(LexerContext& lexerContext){
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    lexerContext.ThreadJobs = ThreadJobs;
+    lexerContext.ThreadCount = info.NumberOfProcessors-1;
+    lexerContext.ThreadHandles = (void**)HeapAlloc(GetProcessHeap(), 0, 4096);
+    for (auto t = 0; t < lexerContext.ThreadCount; ++t){
+        auto threadHandle = ::CreateThread(nullptr, 0, Startup, &lexerContext, 0, nullptr);
+        SetThreadAffinityMask(threadHandle,2<<t);    
+        lexerContext.ThreadHandles[t] = threadHandle;
+        lexerContext.ThreadJobs[t].bytes = 0;
+    }
+
+    // init lookup
+    lexerContext.KeywordLookup = initvec<uint8_t>();
+    resize(lexerContext.KeywordLookup,65535);
+    for (auto i = 0; i < 65535; ++i){
+        lexerContext.KeywordLookup[i] = 0;
+    }
+    // sort data
+    lexerContext.Bucket = initvec<Bucket>();
+    // add empty bucket
+    auto& e = add(lexerContext.Bucket);
+    e.Entries = 0;
+    lexerContext.LastBucketIndex++;
+    // add sorted buckets
+    for (auto i = 0; i < KEYWORDS_COUNT; ++i){
+        uint16_t key = (static_cast<uint16_t>(KEYWORDS[i][0])<<8)+KEYWORDS[i][1];
+        auto bucketIndex = lexerContext.KeywordLookup[key];
+        if (bucketIndex == 0){
+            auto& e = add(lexerContext.Bucket);
+            e.Entries = 0;
+            lexerContext.KeywordLookup[key] = lexerContext.LastBucketIndex;
+            bucketIndex = lexerContext.LastBucketIndex;
+            lexerContext.LastBucketIndex++;
+        }        
+        lexerContext.Bucket[bucketIndex].Values[lexerContext.Bucket[bucketIndex].Entries] = i;
+        lexerContext.Bucket[bucketIndex].Entries++;
+    }
+    while(starting_workers!=lexerContext.ThreadCount){
+        Sleep(0);
+    }
+    running = true;
+    while(starting_workers!=0){
+        Sleep(0);
+    }
+}
+
+void freeLexer(LexerContext& lexerContext) {
+    running = false;
+    WaitForMultipleObjects(lexerContext.ThreadCount,lexerContext.ThreadHandles,true, 0xffffffff);
+    HeapFree(GetProcessHeap(), 0, lexerContext.ThreadHandles);
+}
+/*
 TokenList lexer(const LexerContext& Context, uint8_t* Buffer, size_t Bytes, bool IgnoreSkipables, bool GenerateTokenInfos){
     TokenList result;
     result.left = initvec<uint8_t>();
@@ -566,7 +802,7 @@ TokenList lexer(const LexerContext& Context, uint8_t* Buffer, size_t Bytes, bool
         }
     }
     return result;
-}
+}*/
 #else
 enum SingleCharacterTerminals:uint8_t{
     Comma=0, LeftBracket, RightBracket, Equal, Colon, Semicolon, Exclamationmark, Tilde,
